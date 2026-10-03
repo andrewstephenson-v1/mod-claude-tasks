@@ -11,8 +11,8 @@ function memoryStore(on: On) {
   })
 }
 
-function stubSession(on: On) {
-  on('session.id', async () => ({ value: 'test-session' }))
+function stubProject(on: On) {
+  on('session.root', async () => ({ value: '/test/project' }))
 }
 
 // Nor a UI: the pane opens and toasts land nowhere.
@@ -24,7 +24,7 @@ function stubUi(on: On) {
 
 test('post adds a task and list reports it open', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   const posted = await $.tool.call({
     tool: 'mcp__human-tasks__task', action: 'post',
@@ -40,7 +40,7 @@ test('post adds a task and list reports it open', async ($, on) => {
 
 test('remove hides a task from the list', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Something' })
   const removed = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'remove', id: 1 })
@@ -52,7 +52,7 @@ test('remove hides a task from the list', async ($, on) => {
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`the pane draws an open task's commands on ${surface}`, async ($, on) => {
     memoryStore(on)
-  stubSession(on)
+  stubProject(on)
     stubUi(on)
     await $.tool.call({
       tool: 'mcp__human-tasks__task', action: 'post',
@@ -83,7 +83,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
 test('a blank title is rejected and nothing is posted', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   const posted = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: '   ' })
   expect(String(posted.result)).toContain('title')
@@ -93,7 +93,7 @@ test('a blank title is rejected and nothing is posted', async ($, on) => {
 
 test('options are capped at six and ids increase', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'One' })
   const second = await $.tool.call({
@@ -106,7 +106,7 @@ test('options are capped at six and ids increase', async ($, on) => {
 
 test('removing an unknown or already removed task reports it', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   const missing = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'remove', id: 9 })
   expect(String(missing.result)).toContain('No task #9')
@@ -114,7 +114,7 @@ test('removing an unknown or already removed task reports it', async ($, on) => 
 
 test('the pane offers Clear completed only once a task is finished', async ($, on) => {
   memoryStore(on)
-  stubSession(on)
+  stubProject(on)
   stubUi(on)
   on('prompt.submit', async () => ({ value: undefined }))
   await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Check' })
