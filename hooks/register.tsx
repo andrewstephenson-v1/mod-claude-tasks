@@ -260,7 +260,7 @@ export const register: Register = (on) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
-    const { Box, Text, Button, Code } = ui
+    const { Box, Text, Button, Code, Markdown } = ui
     // Not every surface can draw a text input; those fall back to buttons only
     const Input = 'Input' in ui ? ui.Input : undefined
     const { tasks } = await read($, board)
@@ -271,11 +271,15 @@ export const register: Register = (on) => {
     // Newest first
     const finished = tasks.filter(isFinished).reverse()
     const ruleWidth = Math.max(10, e.props.bodyColumns)
-    const rule = (key: string) => (
-      <Text key={key} dimColor>
-        {'─'.repeat(ruleWidth)}
-      </Text>
-    )
+    // A run of box-drawing characters renders as two lines on the desktop, so it draws a markdown rule
+    const rule = (key: string) =>
+      e.surface === 'terminal' ? (
+        <Text key={key} dimColor>
+          {'─'.repeat(ruleWidth)}
+        </Text>
+      ) : (
+        <Markdown key={key} text="---" dimColor />
+      )
 
     const tabButton = (id: Tab, name: string, count: number) => (
       <Button

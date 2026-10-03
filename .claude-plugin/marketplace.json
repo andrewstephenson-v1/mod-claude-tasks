@@ -7,7 +7,7 @@
       "name": "human-tasks",
       "source": "./",
       "description": "A persistent pane of actions Claude needs you to run: tick them off, pick an outcome, or reply, and Claude is told",
-      "version": "0.2.1"
+      "version": "0.2.2"
     }
   ]
 }
