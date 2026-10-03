@@ -205,7 +205,7 @@ export const register: Register = (on) => {
           title: { type: 'string', description: 'post: short imperative title' },
           steps: {
             type: 'array',
-            description: 'post: ordered steps, each with prose `text`, a shell `command` (shown as a code block with a Copy button), or both. Keep each command short enough to fit on one line; for anything longer, write a script file and post the command that runs it, because the user pastes these into a terminal',
+            description: 'post: ordered steps, each with prose `text`, a shell `command` (shown as a code block with a copy control), or both. Keep each command short enough to fit on one line; for anything longer, write a script file and post the command that runs it, because the user pastes these into a terminal',
             items: {
               type: 'object',
               properties: { text: { type: 'string' }, command: { type: 'string' } },
@@ -381,10 +381,10 @@ export const register: Register = (on) => {
             {t.steps.map((s, i) => (
               <Box key={`step-${i}`} flexDirection="column">
                 {s.text && <Text wrap="wrap">{`${i + 1}. ${s.text}`}</Text>}
-                {s.command && (
+                {s.command && e.surface === 'terminal' && (
                   <Button
                     key={`copy-${t.id}-${i}`}
-                    label="Copy command"
+                    label="Copy"
                     onPress={async (press) => {
                       // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
                       const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
