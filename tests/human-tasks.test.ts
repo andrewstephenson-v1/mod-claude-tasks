@@ -78,6 +78,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     })
     expect(await pane.find({ type: 'Code', text: 'date' })).toBeDefined()
     expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeDefined()
+    // The desktop's code block has its own copy control, so only the terminal gets a button
+    const copy = await pane.find({ type: 'Button', key: 'copy-1-0' })
+    expect(copy !== undefined).toBe(surface === 'terminal')
   })
 }
 
