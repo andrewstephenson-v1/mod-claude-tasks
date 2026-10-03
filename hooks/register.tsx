@@ -8,7 +8,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import type { Board, Task, TaskStatus } from '../types'
+import type { Board, Mode, Task, TaskStatus } from '../types'
 
 const PANE = 'human-tasks'
 // Not 'tasks': that is a built-in command and the engine refuses it
@@ -23,6 +23,7 @@ const MAX_FINISHED = 50
 const SHOWN_FINISHED = 3
 
 const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: [], nextId: 1 } as Board)
+const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
 
 type TaskInput = {
@@ -30,9 +31,18 @@ type TaskInput = {
   id?: unknown
   title?: unknown
   steps?: unknown
+  note?: unknown
   expect?: unknown
   options?: unknown
 }
+
+/** Not per project: the choice follows the user. */
+const MODE_KEY = 'mode'
+
+/** Appended to the system prompt only once the user opts in to automatic use. */
+const AUTO_GUIDANCE = `# human-tasks pane
+When you need the user to do something only they can do (run a command in their own terminal, check a console or dashboard, make a decision, supply a value), post it with the mcp__human-tasks__task tool instead of asking in chat. One task per independent action, in order.
+Check tasks off as you learn they are done. If the user confirms in chat, or pastes output that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.`
 
 const label = (t: Task) => `#${t.id} "${t.title}"`
 
@@ -60,6 +70,11 @@ function prune(b: Board): Board {
   const finished = kept.filter(isFinished)
   const drop = new Set(finished.slice(0, Math.max(0, finished.length - MAX_FINISHED)).map((t) => t.id))
   return { ...b, tasks: kept.filter((t) => !drop.has(t.id)) }
+}
+
+async function setMode($: Engine, next: Mode) {
+  await update($, mode, () => next)
+  await $.store.set(MODE_KEY, next)
 }
 
 const storeKey = async ($: Engine) => `tasks:${await $.session.root()}`
@@ -138,6 +153,21 @@ async function removeTask($: Engine, id: number) {
   return { result: `Removed task #${id}.` }
 }
 
+async function completeTask($: Engine, id: number, note: unknown) {
+  const { tasks } = await read($, board)
+  const found = tasks.find((t) => t.id === id)
+  if (!found || found.status === 'removed') return { result: `No task #${id}.` }
+  if (found.status !== 'open') return { result: `Task #${id} is already ${found.status}.` }
+  const text = typeof note === 'string' ? note.trim() : ''
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) =>
+      t.id === id && t.status === 'open' ? { ...t, status: 'done' as const, answer: text } : t,
+    ),
+  }))
+  return { result: `Marked task #${id} done.` }
+}
+
 async function listTasks($: Engine) {
   const { tasks } = await read($, board)
   const visible = tasks.filter((t) => t.status !== 'removed')
@@ -157,14 +187,21 @@ export const register: Register = (on) => {
       await update($, board, () => ({ tasks: saved.tasks, nextId }))
     }
 
+    const savedMode = await $.store.get(MODE_KEY)
+    if (savedMode === 'auto' || savedMode === 'manual') {
+      await update($, mode, () => savedMode)
+    } else {
+      $.ui.toast(`human-tasks: run /${COMMAND} to choose whether Claude uses the task pane automatically`)
+    }
+
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "list" shows tasks, statuses and answers.',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`); "list" shows tasks, statuses and answers.',
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['post', 'remove', 'list'] },
+          action: { type: 'string', enum: ['post', 'remove', 'complete', 'list'] },
           title: { type: 'string', description: 'post: short imperative title' },
           steps: {
             type: 'array',
@@ -180,7 +217,8 @@ export const register: Register = (on) => {
             items: { type: 'string' },
             description: `post: known outcomes offered as buttons (max ${MAX_OPTIONS})`,
           },
-          id: { type: 'number', description: 'remove: task id' },
+          id: { type: 'number', description: 'remove or complete: task id' },
+          note: { type: 'string', description: 'complete: what the user confirmed, in a few words' },
         },
       },
     })
@@ -199,10 +237,20 @@ export const register: Register = (on) => {
         return postTask($, input)
       case 'remove':
         return removeTask($, Number(input.id))
+      case 'complete':
+        return completeTask($, Number(input.id), input.note)
       case 'list':
         return listTasks($)
       default:
-        return { result: 'Unknown action. Use post, remove or list.' }
+        return { result: 'Unknown action. Use post, remove, complete or list.' }
+    }
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const result = await next(e)
+    if ((await $.store.get(MODE_KEY)) !== 'auto') return result
+    return {
+      sections: [...result.sections, { id: 'human-tasks:guidance', text: AUTO_GUIDANCE, scope: 'session' as const }],
     }
   })
 
@@ -218,6 +266,7 @@ export const register: Register = (on) => {
     const Input = 'Input' in ui ? ui.Input : undefined
     const { tasks } = await read($, board)
     const replying = await read($, replyingId)
+    const currentMode = await read($, mode)
     const open = tasks.filter((t) => t.status === 'open')
     const allFinished = tasks.filter(isFinished)
     const finished = allFinished.slice(-SHOWN_FINISHED)
@@ -227,6 +276,27 @@ export const register: Register = (on) => {
         {`✓ #${t.id} ${t.title}${t.answer ? `: ${t.answer}` : ''}`}
       </Text>
     ))
+
+    const onboarding = currentMode === 'unset' && (
+      <Box key="onboarding" flexDirection="column" marginBottom={1}>
+        <Text bold>Let Claude use this pane on its own?</Text>
+        <Text wrap="wrap" dimColor>
+          Claude would post anything only you can do here, and check tasks off when you confirm them in chat.
+        </Text>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+          <Button key="mode-auto" label="Yes, automatically" onPress={() => setMode($, 'auto')} />
+          <Button key="mode-manual" label="Only when I ask" onPress={() => setMode($, 'manual')} />
+        </Box>
+      </Box>
+    )
+
+    const modeButton = currentMode !== 'unset' && (
+      <Button
+        key="mode-toggle"
+        label={currentMode === 'auto' ? 'Auto: on' : 'Auto: off'}
+        onPress={() => setMode($, currentMode === 'auto' ? 'manual' : 'auto')}
+      />
+    )
 
     const clearButton = (
       <Button
@@ -239,15 +309,18 @@ export const register: Register = (on) => {
     if (open.length === 0) {
       return (
         <Box flexDirection="column">
+          {onboarding}
           <Text dimColor>Nothing for you to do right now.</Text>
           {finishedRows}
           {allFinished.length > 0 && clearButton}
+          {modeButton}
         </Box>
       )
     }
 
     return (
       <Box flexDirection="column">
+        {onboarding}
         {open.map((t, idx) => (
           <Box key={`task-${t.id}`} flexDirection="column" marginTop={idx > 0 ? 1 : 0}>
             <Text bold>{`#${t.id}  ${t.title}`}</Text>
@@ -325,6 +398,7 @@ export const register: Register = (on) => {
             {clearButton}
           </Box>
         )}
+        {modeButton}
       </Box>
     )
   })
