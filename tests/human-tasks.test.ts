@@ -134,3 +134,44 @@ test('the pane offers Clear completed only once a task is finished', async ($, o
   })
   expect(await pane.find({ type: 'Button', key: 'clear-completed' })).toBeUndefined()
 })
+
+test('complete checks off an open task and rejects repeats and unknown ids', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Run it' })
+  const done = await $.tool.call({
+    tool: 'mcp__human-tasks__task', action: 'complete', id: 1, note: 'user confirmed in chat',
+  })
+  expect(String(done.result)).toContain('Marked task #1 done')
+  const listed = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })
+  expect(String(listed.result)).toContain('#1 [done] Run it (answer: user confirmed in chat)')
+  const again = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1 })
+  expect(String(again.result)).toContain('already done')
+  const missing = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 9 })
+  expect(String(missing.result)).toContain('No task #9')
+})
+
+test('the pane offers onboarding until a mode is chosen', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const mount = () =>
+    $.ui.mount({
+      plugin: 'human-tasks',
+      surface: 'terminal',
+      component: 'Pane',
+      props: {
+        title: 'Tasks for you',
+        isFocused: false,
+        bodyColumns: 80,
+        placement: 'dock',
+        scroll: { offset: 0, max: 0 } as never,
+        view: {} as never,
+      },
+      requestId: 'human-tasks',
+    })
+  const first = await mount()
+  expect(await first.find({ type: 'Button', key: 'mode-auto' })).toBeDefined()
+  expect(await first.find({ type: 'Button', key: 'mode-toggle' })).toBeUndefined()
+})

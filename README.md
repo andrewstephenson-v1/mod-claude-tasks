@@ -10,10 +10,14 @@ Claude posts a task (title, steps or shell commands, what to expect, optional ou
 
 The mod then starts a turn telling Claude what you did.
 
+## Automatic use
+
+The first time you open the pane (`/human-tasks`) it asks whether Claude should use it on its own. Choosing **Yes, automatically** adds a short section to the system prompt so Claude posts anything only you can do, and checks tasks off when you confirm them in chat or paste output that clearly shows success. **Only when I ask** leaves the tool available without that nudge. The **Auto** button at the bottom of the pane flips the choice later; it is stored once for you, not per project.
+
 ## Usage
 
 - `/human-tasks` opens the pane.
-- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove` or `list`. The mod registers it itself; there is no separate MCP server.
+- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove`, `complete` or `list`. The mod registers it itself; there is no separate MCP server.
 - Tasks are stored per project (keyed by the session's project root) and survive restarts. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
 
 ## Install
