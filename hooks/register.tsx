@@ -15,6 +15,8 @@ const PANE = 'human-tasks'
 const COMMAND = 'human-tasks'
 const PANE_TITLE = 'Tasks for you'
 const MAX_OPTIONS = 6
+/** Body rows requested for the inline pane; the default is a third of the screen. */
+const PANE_ROWS = 24
 /** Finished tasks kept in the store; older ones are dropped. */
 const MAX_FINISHED = 50
 /** Finished tasks shown under the open ones. */
@@ -120,7 +122,7 @@ async function postTask($: Engine, input: TaskInput) {
   })
   if (!task) return { result: 'Could not post the task.' }
 
-  await $.ui.open({ id: PANE, title: PANE_TITLE })
+  await $.ui.open({ id: PANE, title: PANE_TITLE, rows: PANE_ROWS })
   $.ui.toast(`New task #${task.id}: ${task.title}`)
   return { result: `Posted task #${task.id}. The user will see it in the human-tasks pane (/human-tasks opens it).` }
 }
@@ -205,7 +207,7 @@ export const register: Register = (on) => {
   })
 
   on('command.run', { command: COMMAND }, async ($) => {
-    await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })
+    await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true, rows: PANE_ROWS })
     return {}
   })
 
@@ -253,6 +255,17 @@ export const register: Register = (on) => {
               <Box key={`step-${i}`} flexDirection="column">
                 {s.text && <Text wrap="wrap">{`${i + 1}. ${s.text}`}</Text>}
                 {s.command && <Code source={s.command} language="sh" />}
+                {s.command && (
+                  <Button
+                    key={`copy-${t.id}-${i}`}
+                    label="Copy command"
+                    onPress={async (press) => {
+                      // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
+                      const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
+                      $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
+                    }}
+                  />
+                )}
               </Box>
             ))}
             {t.expect && (
