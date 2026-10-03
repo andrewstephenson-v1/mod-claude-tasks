@@ -8,7 +8,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import type { Board, Mode, Task, TaskStatus } from '../types'
+import type { Board, Mode, Tab, Task, TaskStatus } from '../types'
 
 const PANE = 'human-tasks'
 // Not 'tasks': that is a built-in command and the engine refuses it
@@ -19,11 +19,10 @@ const MAX_OPTIONS = 6
 const PANE_ROWS = 24
 /** Finished tasks kept in the store; older ones are dropped. */
 const MAX_FINISHED = 50
-/** Finished tasks shown under the open ones. */
-const SHOWN_FINISHED = 3
 
 const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: [], nextId: 1 } as Board)
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
+const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
 
 type TaskInput = {
@@ -267,15 +266,34 @@ export const register: Register = (on) => {
     const { tasks } = await read($, board)
     const replying = await read($, replyingId)
     const currentMode = await read($, mode)
+    const currentTab = await read($, tab)
     const open = tasks.filter((t) => t.status === 'open')
-    const allFinished = tasks.filter(isFinished)
-    const finished = allFinished.slice(-SHOWN_FINISHED)
-
-    const finishedRows = finished.map((t) => (
-      <Text key={`fin-${t.id}`} dimColor>
-        {`✓ #${t.id} ${t.title}${t.answer ? `: ${t.answer}` : ''}`}
+    // Newest first
+    const finished = tasks.filter(isFinished).reverse()
+    const ruleWidth = Math.max(10, e.props.bodyColumns)
+    const rule = (key: string) => (
+      <Text key={key} dimColor>
+        {'─'.repeat(ruleWidth)}
       </Text>
-    ))
+    )
+
+    const tabButton = (id: Tab, name: string, count: number) => (
+      <Button
+        key={`tab-${id}`}
+        label={`${currentTab === id ? '●' : '○'} ${name} (${count})`}
+        onPress={() => update($, tab, () => id)}
+      />
+    )
+
+    const tabs = (
+      <Box key="tabs" flexDirection="column">
+        <Box flexDirection="row" columnGap={1}>
+          {tabButton('open', 'Open', open.length)}
+          {tabButton('completed', 'Completed', finished.length)}
+        </Box>
+        {rule('tabs-rule')}
+      </Box>
+    )
 
     const onboarding = currentMode === 'unset' && (
       <Box key="onboarding" flexDirection="column" marginBottom={1}>
@@ -291,28 +309,31 @@ export const register: Register = (on) => {
     )
 
     const modeButton = currentMode !== 'unset' && (
-      <Button
-        key="mode-toggle"
-        label={currentMode === 'auto' ? 'Auto: on' : 'Auto: off'}
-        onPress={() => setMode($, currentMode === 'auto' ? 'manual' : 'auto')}
-      />
+      <Box key="mode" marginTop={1}>
+        <Button
+          label={currentMode === 'auto' ? 'Auto: on' : 'Auto: off'}
+          onPress={() => setMode($, currentMode === 'auto' ? 'manual' : 'auto')}
+        />
+      </Box>
     )
 
-    const clearButton = (
-      <Button
-        key="clear-completed"
-        label={`Clear completed (${allFinished.length})`}
-        onPress={() => clearCompleted($)}
-      />
-    )
-
-    if (open.length === 0) {
+    if (currentTab === 'completed') {
       return (
         <Box flexDirection="column">
-          {onboarding}
-          <Text dimColor>Nothing for you to do right now.</Text>
-          {finishedRows}
-          {allFinished.length > 0 && clearButton}
+          {tabs}
+          {finished.length === 0 && <Text dimColor>Nothing completed yet.</Text>}
+          {finished.map((t, idx) => (
+            <Box key={`fin-${t.id}`} flexDirection="column">
+              {idx > 0 && rule(`fin-rule-${t.id}`)}
+              <Text dimColor wrap="wrap">{`✓ #${t.id}  ${t.title}`}</Text>
+              {t.answer && <Text dimColor wrap="wrap">{`${t.status}: ${t.answer}`}</Text>}
+            </Box>
+          ))}
+          {finished.length > 0 && (
+            <Box key="clear" marginTop={1}>
+              <Button label={`Clear completed (${finished.length})`} onPress={() => clearCompleted($)} />
+            </Box>
+          )}
           {modeButton}
         </Box>
       )
@@ -320,9 +341,12 @@ export const register: Register = (on) => {
 
     return (
       <Box flexDirection="column">
+        {tabs}
         {onboarding}
+        {open.length === 0 && <Text dimColor>Nothing for you to do right now.</Text>}
         {open.map((t, idx) => (
-          <Box key={`task-${t.id}`} flexDirection="column" marginTop={idx > 0 ? 1 : 0}>
+          <Box key={`task-${t.id}`} flexDirection="column">
+            {idx > 0 && rule(`rule-${t.id}`)}
             <Text bold>{`#${t.id}  ${t.title}`}</Text>
             {t.steps.map((s, i) => (
               <Box key={`step-${i}`} flexDirection="column">
@@ -392,12 +416,6 @@ export const register: Register = (on) => {
             )}
           </Box>
         ))}
-        {finished.length > 0 && (
-          <Box marginTop={1} flexDirection="column">
-            {finishedRows}
-            {clearButton}
-          </Box>
-        )}
         {modeButton}
       </Box>
     )

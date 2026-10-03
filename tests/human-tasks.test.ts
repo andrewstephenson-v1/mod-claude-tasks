@@ -175,3 +175,29 @@ test('the pane offers onboarding until a mode is chosen', async ($, on) => {
   expect(await first.find({ type: 'Button', key: 'mode-auto' })).toBeDefined()
   expect(await first.find({ type: 'Button', key: 'mode-toggle' })).toBeUndefined()
 })
+
+test('the pane has Open and Completed tabs and a finished task leaves the Open tab', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Check', options: ['Yes'] })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, note: 'ok' })
+  const pane = await $.ui.mount({
+    plugin: 'human-tasks',
+    surface: 'terminal',
+    component: 'Pane',
+    props: {
+      title: 'Tasks for you',
+      isFocused: false,
+      bodyColumns: 80,
+      placement: 'dock',
+      scroll: { offset: 0, max: 0 } as never,
+      view: {} as never,
+    },
+    requestId: 'human-tasks',
+  })
+  expect(await pane.find({ type: 'Button', key: 'tab-open' })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'tab-completed' })).toBeDefined()
+  // Finished, so not drawn on the Open tab
+  expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeUndefined()
+})

@@ -15,6 +15,9 @@ export type Task = {
 /** Whether Claude uses the pane on its own: `unset` until the user answers the onboarding card. */
 export type Mode = 'unset' | 'auto' | 'manual'
 
+/** The pane's two views. */
+export type Tab = 'open' | 'completed'
+
 export type Board = { tasks: Task[]; nextId: number }
 
 declare module 'claude-code' {
@@ -24,6 +27,7 @@ declare module 'claude-code' {
       /** Id of the task whose reply field is open, if any. */
       replyingId: number | null
       mode: Mode
+      tab: Tab
     }
   }
 }
