@@ -95,6 +95,10 @@ async function resolveTask(
   void $.prompt.submit({ text: message(resolved) })
 }
 
+async function clearCompleted($: Engine) {
+  await mutate($, (b) => ({ ...b, tasks: b.tasks.filter((t) => !isFinished(t)) }))
+}
+
 async function postTask($: Engine, input: TaskInput) {
   const title = typeof input.title === 'string' ? input.title.trim() : ''
   if (!title) return { result: 'A non-empty `title` is required.' }
@@ -211,7 +215,8 @@ export const register: Register = (on) => {
     const { tasks } = await read($, board)
     const replying = await read($, replyingId)
     const open = tasks.filter((t) => t.status === 'open')
-    const finished = tasks.filter(isFinished).slice(-SHOWN_FINISHED)
+    const allFinished = tasks.filter(isFinished)
+    const finished = allFinished.slice(-SHOWN_FINISHED)
 
     const finishedRows = finished.map((t) => (
       <Text key={`fin-${t.id}`} dimColor>
@@ -219,11 +224,20 @@ export const register: Register = (on) => {
       </Text>
     ))
 
+    const clearButton = (
+      <Button
+        key="clear-completed"
+        label={`Clear completed (${allFinished.length})`}
+        onPress={() => clearCompleted($)}
+      />
+    )
+
     if (open.length === 0) {
       return (
         <Box flexDirection="column">
           <Text dimColor>Nothing for you to do right now.</Text>
           {finishedRows}
+          {allFinished.length > 0 && clearButton}
         </Box>
       )
     }
@@ -290,7 +304,12 @@ export const register: Register = (on) => {
             )}
           </Box>
         ))}
-        {finished.length > 0 && <Box marginTop={1} flexDirection="column">{finishedRows}</Box>}
+        {finished.length > 0 && (
+          <Box marginTop={1} flexDirection="column">
+            {finishedRows}
+            {clearButton}
+          </Box>
+        )}
       </Box>
     )
   })

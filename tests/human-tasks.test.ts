@@ -111,3 +111,26 @@ test('removing an unknown or already removed task reports it', async ($, on) => 
   const missing = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'remove', id: 9 })
   expect(String(missing.result)).toContain('No task #9')
 })
+
+test('the pane offers Clear completed only once a task is finished', async ($, on) => {
+  memoryStore(on)
+  stubSession(on)
+  stubUi(on)
+  on('prompt.submit', async () => ({ value: undefined }))
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Check' })
+  const pane = await $.ui.mount({
+    plugin: 'human-tasks',
+    surface: 'terminal',
+    component: 'Pane',
+    props: {
+      title: 'Tasks for you',
+      isFocused: false,
+      bodyColumns: 80,
+      placement: 'dock',
+      scroll: { offset: 0, max: 0 } as never,
+      view: {} as never,
+    },
+    requestId: 'human-tasks',
+  })
+  expect(await pane.find({ type: 'Button', key: 'clear-completed' })).toBeUndefined()
+})

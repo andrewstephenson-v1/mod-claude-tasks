@@ -41,3 +41,7 @@ npx -p typescript tsc -p . # type-check (needs the engine-generated .claude-plug
 - `hooks/register.tsx`: the hooks module
 - `types/index.d.ts`: task types and the `$.state` contract
 - `tests/`: `claude plugin test` suite
+
+## License
+
+MIT, see [LICENSE](LICENSE).
