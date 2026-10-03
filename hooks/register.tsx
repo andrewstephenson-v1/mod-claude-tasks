@@ -23,6 +23,7 @@ const MAX_FINISHED = 50
 const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: [], nextId: 1 } as Board)
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
 const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
+const expandedIds = atom({ plugin: 'human-tasks', key: 'expandedIds' } as const, [] as number[])
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
 
 type TaskInput = {
@@ -267,6 +268,7 @@ export const register: Register = (on) => {
     const replying = await read($, replyingId)
     const currentMode = await read($, mode)
     const currentTab = await read($, tab)
+    const expanded = await read($, expandedIds)
     const open = tasks.filter((t) => t.status === 'open')
     // Newest first
     const finished = tasks.filter(isFinished).reverse()
@@ -289,11 +291,23 @@ export const register: Register = (on) => {
       />
     )
 
+    const modeButton =
+      currentMode !== 'unset' ? (
+        <Button
+          key="mode-toggle"
+          label={currentMode === 'auto' ? 'Auto: on' : 'Auto: off'}
+          onPress={() => setMode($, currentMode === 'auto' ? 'manual' : 'auto')}
+        />
+      ) : null
+
     const tabs = (
       <Box key="tabs" flexDirection="column">
-        <Box flexDirection="row" columnGap={1}>
-          {tabButton('open', 'Open', open.length)}
-          {tabButton('completed', 'Completed', finished.length)}
+        <Box flexDirection="row" justifyContent="space-between">
+          <Box flexDirection="row" columnGap={1}>
+            {tabButton('open', 'Open', open.length)}
+            {tabButton('completed', 'Completed', finished.length)}
+          </Box>
+          {modeButton}
         </Box>
         {rule('tabs-rule')}
       </Box>
@@ -312,33 +326,45 @@ export const register: Register = (on) => {
       </Box>
     )
 
-    const modeButton = currentMode !== 'unset' && (
-      <Box key="mode" marginTop={1}>
-        <Button
-          label={currentMode === 'auto' ? 'Auto: on' : 'Auto: off'}
-          onPress={() => setMode($, currentMode === 'auto' ? 'manual' : 'auto')}
-        />
-      </Box>
-    )
-
     if (currentTab === 'completed') {
       return (
         <Box flexDirection="column">
           {tabs}
           {finished.length === 0 && <Text dimColor>Nothing completed yet.</Text>}
-          {finished.map((t, idx) => (
-            <Box key={`fin-${t.id}`} flexDirection="column">
-              {idx > 0 && rule(`fin-rule-${t.id}`)}
-              <Text dimColor wrap="wrap">{`✓ #${t.id}  ${t.title}`}</Text>
-              {t.answer && <Text dimColor wrap="wrap">{`${t.status}: ${t.answer}`}</Text>}
-            </Box>
-          ))}
+          {finished.map((t, idx) => {
+            const isOpen = expanded.includes(t.id)
+            return (
+              <Box key={`fin-${t.id}`} flexDirection="column">
+                {idx > 0 && rule(`fin-rule-${t.id}`)}
+                <Box flexDirection="row">
+                  <Button
+                    key={`toggle-${t.id}`}
+                    label={`${isOpen ? '▾' : '▸'} ✓ #${t.id}  ${t.title}`}
+                    onPress={() =>
+                      update($, expandedIds, (ids) => (ids.includes(t.id) ? ids.filter((i) => i !== t.id) : [...ids, t.id]))
+                    }
+                  />
+                </Box>
+                {isOpen && (
+                  <Box flexDirection="column" paddingLeft={2}>
+                    {t.steps.map((st, i) => (
+                      <Box key={`fstep-${t.id}-${i}`} flexDirection="column">
+                        {st.text && <Text dimColor wrap="wrap">{`${i + 1}. ${st.text}`}</Text>}
+                        {st.command && <Code source={st.command} language="sh" />}
+                      </Box>
+                    ))}
+                    {t.expect && <Text dimColor wrap="wrap">{`Expect: ${t.expect}`}</Text>}
+                    <Text wrap="wrap">{t.answer ? `${t.status}: ${t.answer}` : t.status}</Text>
+                  </Box>
+                )}
+              </Box>
+            )
+          })}
           {finished.length > 0 && (
             <Box key="clear" marginTop={1}>
               <Button label={`Clear completed (${finished.length})`} onPress={() => clearCompleted($)} />
             </Box>
           )}
-          {modeButton}
         </Box>
       )
     }
@@ -420,7 +446,6 @@ export const register: Register = (on) => {
             )}
           </Box>
         ))}
-        {modeButton}
       </Box>
     )
   })

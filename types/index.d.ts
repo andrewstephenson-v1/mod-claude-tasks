@@ -28,6 +28,8 @@ declare module 'claude-code' {
       replyingId: number | null
       mode: Mode
       tab: Tab
+      /** Ids of completed tasks shown expanded. */
+      expandedIds: number[]
     }
   }
 }

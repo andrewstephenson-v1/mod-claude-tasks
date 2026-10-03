@@ -201,3 +201,35 @@ test('the pane has Open and Completed tabs and a finished task leaves the Open t
   // Finished, so not drawn on the Open tab
   expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeUndefined()
 })
+
+test('completed tasks expand and collapse when their title is pressed', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({
+    tool: 'mcp__human-tasks__task', action: 'post', title: 'Check',
+    steps: [{ text: 'Run it', command: 'echo expanded-marker' }],
+  })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, note: 'all good' })
+  const pane = await $.ui.mount({
+    plugin: 'human-tasks',
+    surface: 'terminal',
+    component: 'Pane',
+    props: {
+      title: 'Tasks for you',
+      isFocused: false,
+      bodyColumns: 80,
+      placement: 'dock',
+      scroll: { offset: 0, max: 0 } as never,
+      view: {} as never,
+    },
+    requestId: 'human-tasks',
+  })
+  await pane.press({ key: 'tab-completed' })
+  expect(await pane.find({ type: 'Button', key: 'toggle-1' })).toBeDefined()
+  expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeUndefined()
+  await pane.press({ key: 'toggle-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeDefined()
+  await pane.press({ key: 'toggle-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeUndefined()
+})
