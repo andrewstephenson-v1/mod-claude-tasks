@@ -1,0 +1,4 @@
+{
+  "description": "human-tasks hooks module",
+  "modules": ["./register.tsx"]
+}

@@ -1,0 +1,37 @@
+# human-tasks
+
+A Claude Code mod that keeps the manual steps Claude asks you to perform in a persistent pane, instead of letting them scroll away in the chat.
+
+Claude posts a task (title, steps or shell commands, what to expect, optional outcomes). Each open task stays visible until you:
+
+- press **Done**,
+- pick one of its **outcomes**, or
+- **Reply** with free text (for example pasted output).
+
+The mod then starts a turn telling Claude what you did.
+
+## Usage
+
+- `/tasks` opens the pane.
+- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove` or `list`. The mod registers it itself; there is no separate MCP server.
+- Tasks are stored per session and survive a reload. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
+
+## Install
+
+Load it from a clone with `claude --plugin-dir /path/to/human-tasks`.
+
+## Develop
+
+```sh
+claude plugin validate .   # manifest and hooks
+claude plugin test .       # tests/
+npx -p typescript tsc -p . # type-check (needs the engine-generated .claude-plugin/types/)
+```
+
+`.claude-plugin/types/` is written by Claude Code when the mod first loads and is not committed.
+
+## Layout
+
+- `hooks/register.tsx`: the hooks module
+- `types/index.d.ts`: task types and the `$.state` contract
+- `tests/`: `claude plugin test` suite
