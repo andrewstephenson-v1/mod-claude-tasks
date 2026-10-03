@@ -14,7 +14,7 @@ The mod then starts a turn telling Claude what you did.
 
 - `/human-tasks` opens the pane.
 - Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove` or `list`. The mod registers it itself; there is no separate MCP server.
-- Tasks are stored per session and survive a reload. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
+- Tasks are stored per project (keyed by the session's project root) and survive restarts. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
 
 ## Install
 

@@ -60,7 +60,7 @@ function prune(b: Board): Board {
   return { ...b, tasks: kept.filter((t) => !drop.has(t.id)) }
 }
 
-const storeKey = async ($: Engine) => `tasks:${await $.session.id()}`
+const storeKey = async ($: Engine) => `tasks:${await $.session.root()}`
 
 async function persist($: Engine) {
   await $.store.set(await storeKey($), await read($, board))
