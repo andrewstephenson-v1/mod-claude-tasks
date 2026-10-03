@@ -11,6 +11,8 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { Board, Task, TaskStatus } from '../types'
 
 const PANE = 'human-tasks'
+// Not 'tasks': that is a built-in command and the engine refuses it
+const COMMAND = 'human-tasks'
 const PANE_TITLE = 'Tasks for you'
 const MAX_OPTIONS = 6
 /** Finished tasks kept in the store; older ones are dropped. */
@@ -120,7 +122,7 @@ async function postTask($: Engine, input: TaskInput) {
 
   await $.ui.open({ id: PANE, title: PANE_TITLE })
   $.ui.toast(`New task #${task.id}: ${task.title}`)
-  return { result: `Posted task #${task.id}. The user will see it in the human-tasks pane (/tasks opens it).` }
+  return { result: `Posted task #${task.id}. The user will see it in the human-tasks pane (/human-tasks opens it).` }
 }
 
 async function removeTask($: Engine, id: number) {
@@ -181,9 +183,9 @@ export const register: Register = (on) => {
       },
     })
     try {
-      await $.command.register({ name: 'tasks', description: 'Show the human-tasks pane', immediate: true })
+      await $.command.register({ name: COMMAND, description: 'Show the human-tasks pane', immediate: true })
     } catch (err) {
-      $.ui.log(`could not register /tasks: ${String(err)}`)
+      $.ui.log(`could not register /${COMMAND}: ${String(err)}`)
     }
     return next(e)
   })
@@ -202,7 +204,7 @@ export const register: Register = (on) => {
     }
   })
 
-  on('command.run', { command: 'tasks' }, async ($) => {
+  on('command.run', { command: COMMAND }, async ($) => {
     await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })
     return {}
   })
