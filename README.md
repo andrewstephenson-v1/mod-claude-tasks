@@ -18,7 +18,13 @@ The mod then starts a turn telling Claude what you did.
 
 ## Install
 
-Load it from a clone with `claude --plugin-dir /path/to/human-tasks`.
+```sh
+claude plugin marketplace add andrewstephenson-v1/mod-claude-tasks
+claude plugin install human-tasks@human-tasks --scope user
+```
+
+The repo is private, so the machine needs git access to it (for example `gh auth login` as `andrewstephenson-v1`).
+To try a local clone for one session instead: `claude --plugin-dir /path/to/mod-claude-tasks`.
 
 ## Develop
 
