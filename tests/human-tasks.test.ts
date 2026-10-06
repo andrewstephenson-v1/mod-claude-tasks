@@ -2,8 +2,8 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 // The test harness has no store beneath the plugin; answer it from memory.
-function memoryStore(on: On) {
-  const store = new Map<string, unknown>()
+function memoryStore(on: On, initial: Record<string, unknown> = {}) {
+  const store = new Map<string, unknown>(Object.entries(initial))
   on('store.get', async (_$, e) => ({ value: store.get(e.key) }))
   on('store.set', async (_$, e) => {
     store.set(e.key, e.value)
@@ -235,4 +235,36 @@ test('completed tasks expand and collapse when their title is pressed', async ($
   expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeDefined()
   await pane.press({ key: 'toggle-1' })
   expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeUndefined()
+})
+
+const SAVED = {
+  tasks: [
+    { id: 1, title: 'Old open', steps: [], expect: '', options: [], status: 'open', answer: '' },
+    { id: 2, title: 'Old done', steps: [], expect: '', options: [], status: 'done', answer: '' },
+  ],
+  nextId: 3,
+}
+
+test('a post made before the board is restored keeps the saved tasks and ids', async ($, on) => {
+  // The state after /clear: empty live board, saved board still in the store
+  memoryStore(on, { 'tasks:/test/project': SAVED })
+  stubProject(on)
+  stubUi(on)
+  const posted = await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'New' })
+  expect(String(posted.result)).toContain('Posted task #3')
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] Old open')
+  expect(listed).toContain('#2 [done] Old done')
+  expect(listed).toContain('#3 [open] New')
+})
+
+test('SessionStart with source clear restores the saved board', async ($, on) => {
+  memoryStore(on, { 'tasks:/test/project': SAVED, mode: 'auto' })
+  stubProject(on)
+  stubUi(on)
+  on('classic.SessionStart', async () => ({}))
+  await $.classic.SessionStart({ source: 'clear' })
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] Old open')
+  expect(listed).toContain('#2 [done] Old done')
 })

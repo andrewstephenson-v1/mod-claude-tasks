@@ -27,6 +27,8 @@ declare module 'claude-code' {
       /** Id of the task whose reply field is open, if any. */
       replyingId: number | null
       mode: Mode
+      /** True once the board has been restored from the store. */
+      loaded: boolean
       tab: Tab
       /** Ids of completed tasks shown expanded. */
       expandedIds: number[]
