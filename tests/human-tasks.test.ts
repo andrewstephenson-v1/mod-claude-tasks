@@ -9,6 +9,7 @@ function memoryStore(on: On, initial: Record<string, unknown> = {}) {
     store.set(e.key, e.value)
     return { value: undefined }
   })
+  return store
 }
 
 function stubProject(on: On) {
@@ -286,4 +287,32 @@ test('SessionStart with source clear reopens a pane that was open', async ($, on
   on('classic.SessionStart', async () => ({}))
   await $.classic.SessionStart({ source: 'clear' })
   expect(opened).toEqual(['human-tasks'])
+})
+
+test('the first prompt after /clear reopens a pane the teardown swallowed', async ($, on) => {
+  memoryStore(on, { 'pane:/test/project': true })
+  stubProject(on)
+  on('ui.toast', async () => ({ value: undefined }))
+  on('session.end', async () => ({ sessionId: 'old' }) as never)
+  on('ui.panes', async () => ({ value: [] }))
+  on('prompt.compose', async () => ({ sections: [] }))
+  const opened = recordOpens(on)
+  await $.session.end({ reason: 'clear', sessionId: 'old', resume: {} as never })
+  await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [], sections: [] } as never)
+  expect(opened).toEqual(['human-tasks'])
+})
+
+test('a reopen the engine leaves undrawn says why in the transcript', async ($, on) => {
+  memoryStore(on, { 'pane:/test/project': true })
+  stubProject(on)
+  on('ui.toast', async () => ({ value: undefined }))
+  on('ui.open', async () => ({ value: { isPlaced: false, reason: 'too narrow' } }))
+  const lines: string[] = []
+  on('ui.log', async (_$, e) => {
+    if (e.to !== 'debug') lines.push(e.text)
+    return { value: undefined }
+  })
+  on('classic.SessionStart', async () => ({}))
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(lines.some((l) => l.includes('too narrow'))).toBe(true)
 })

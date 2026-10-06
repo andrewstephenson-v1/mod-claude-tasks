@@ -207,8 +207,17 @@ async function listTasks($: Engine) {
   }
 }
 
+/** Open the pane again after /clear; says why in the transcript if the engine leaves it undrawn. */
+async function reopenPane($: Engine, where: string) {
+  const opened = await openPane($, false)
+  $.ui.log(`human-tasks: reopen (${where}) ${JSON.stringify(opened)}`, { to: 'debug' })
+  if (!opened.isPlaced) $.ui.log(`human-tasks: pane not drawn after /clear: ${opened.reason}`)
+}
+
 export const register: Register = (on) => {
   let reopenOnPrompt = false
+  /** True from the end of a /clear until the first prompt after it: closes in between are teardown. */
+  let clearing = false
 
   on('session.start', async ($, e, next) => {
     await restoreState($)
@@ -252,22 +261,29 @@ export const register: Register = (on) => {
     return next(e)
   })
 
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') clearing = true
+    return next(e)
+  })
+
   // /clear resets the state but not the store, and session.start never fires for it
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     if (e.source === 'clear') {
+      clearing = true
       await restoreState($)
       if ((await $.store.get(await paneKey($))) === true) {
-        await openPane($, false)
+        await reopenPane($, 'session start')
         reopenOnPrompt = true
       }
     }
     return result
   })
 
-  // Only the person or this mod closing the pane means "leave it shut"; an unload (/clear) does not
+  // Only the person or this mod closing the pane means "leave it shut"; the /clear teardown does not
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    if (e.origin !== 'unload') await $.store.set(await paneKey($), false)
+    $.ui.log(`human-tasks: ui.close ${e.origin.kind} (clearing: ${clearing})`, { to: 'debug' })
+    if (e.origin.kind !== 'unload' && !clearing) await $.store.set(await paneKey($), false)
     return next(e)
   })
 
@@ -291,9 +307,11 @@ export const register: Register = (on) => {
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
     // The /clear teardown can land after SessionStart and swallow that open, so retry on the first prompt
-    if (reopenOnPrompt) {
+    if (reopenOnPrompt || clearing) {
       reopenOnPrompt = false
-      if ((await $.store.get(await paneKey($))) === true) await openPane($, false)
+      clearing = false
+      const isOpen = (await $.ui.panes()).some((p) => p.id === PANE && p.isPlaced)
+      if (!isOpen && (await $.store.get(await paneKey($))) === true) await reopenPane($, 'first prompt')
     }
     if ((await $.store.get(MODE_KEY)) !== 'auto') return result
     return {
