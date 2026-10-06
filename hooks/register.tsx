@@ -208,6 +208,8 @@ async function listTasks($: Engine) {
 }
 
 export const register: Register = (on) => {
+  let reopenOnPrompt = false
+
   on('session.start', async ($, e, next) => {
     await restoreState($)
     if ((await read($, mode)) === 'unset') {
@@ -255,7 +257,10 @@ export const register: Register = (on) => {
     const result = await next(e)
     if (e.source === 'clear') {
       await restoreState($)
-      if ((await $.store.get(await paneKey($))) === true) await openPane($, false)
+      if ((await $.store.get(await paneKey($))) === true) {
+        await openPane($, false)
+        reopenOnPrompt = true
+      }
     }
     return result
   })
@@ -285,6 +290,11 @@ export const register: Register = (on) => {
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
+    // The /clear teardown can land after SessionStart and swallow that open, so retry on the first prompt
+    if (reopenOnPrompt) {
+      reopenOnPrompt = false
+      if ((await $.store.get(await paneKey($))) === true) await openPane($, false)
+    }
     if ((await $.store.get(MODE_KEY)) !== 'auto') return result
     return {
       sections: [...result.sections, { id: 'human-tasks:guidance', text: AUTO_GUIDANCE, scope: 'session' as const }],
