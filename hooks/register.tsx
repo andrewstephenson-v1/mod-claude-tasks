@@ -85,6 +85,14 @@ async function persist($: Engine) {
   await $.store.set(await storeKey($), await read($, board))
 }
 
+const paneKey = async ($: Engine) => `pane:${await $.session.root()}`
+
+/** Open the pane and remember it, so /clear (which closes every pane) can put it back. */
+async function openPane($: Engine, focus: boolean) {
+  await $.store.set(await paneKey($), true)
+  return $.ui.open({ id: PANE, title: PANE_TITLE, rows: PANE_ROWS, ...(focus ? { focus } : {}) })
+}
+
 /** Load the saved board and mode into the live state. State resets on /clear; the store does not. */
 async function restoreState($: Engine) {
   const saved = (await $.store.get(await storeKey($))) as Board | undefined
@@ -157,7 +165,7 @@ async function postTask($: Engine, input: TaskInput) {
   })
   if (!task) return { result: 'Could not post the task.' }
 
-  await $.ui.open({ id: PANE, title: PANE_TITLE, rows: PANE_ROWS })
+  await openPane($, false)
   $.ui.toast(`New task #${task.id}: ${task.title}`)
   return { result: `Posted task #${task.id}. The user will see it in the human-tasks pane (/human-tasks opens it).` }
 }
@@ -245,8 +253,17 @@ export const register: Register = (on) => {
   // /clear resets the state but not the store, and session.start never fires for it
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
-    if (e.source === 'clear') await restoreState($)
+    if (e.source === 'clear') {
+      await restoreState($)
+      if ((await $.store.get(await paneKey($))) === true) await openPane($, false)
+    }
     return result
+  })
+
+  // Only the person or this mod closing the pane means "leave it shut"; an unload (/clear) does not
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    if (e.origin !== 'unload') await $.store.set(await paneKey($), false)
+    return next(e)
   })
 
   on('tool.call', { tool: 'mcp__human-tasks__task' }, async ($, e) => {
@@ -276,7 +293,7 @@ export const register: Register = (on) => {
 
   on('command.run', { command: COMMAND }, async ($) => {
     await ensureLoaded($)
-    await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true, rows: PANE_ROWS })
+    await openPane($, true)
     return {}
   })
 

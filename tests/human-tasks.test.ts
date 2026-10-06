@@ -268,3 +268,22 @@ test('SessionStart with source clear restores the saved board', async ($, on) =>
   expect(listed).toContain('#1 [open] Old open')
   expect(listed).toContain('#2 [done] Old done')
 })
+
+function recordOpens(on: On) {
+  const opened: string[] = []
+  on('ui.open', async (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  return opened
+}
+
+test('SessionStart with source clear reopens a pane that was open', async ($, on) => {
+  memoryStore(on, { 'pane:/test/project': true })
+  stubProject(on)
+  on('ui.toast', async () => ({ value: undefined }))
+  const opened = recordOpens(on)
+  on('classic.SessionStart', async () => ({}))
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(opened).toEqual(['human-tasks'])
+})
