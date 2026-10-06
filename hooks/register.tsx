@@ -24,6 +24,8 @@ const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: []
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
 const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
 const expandedIds = atom({ plugin: 'human-tasks', key: 'expandedIds' } as const, [] as number[])
+/** False until the board is restored from the store; /clear resets it with the rest of the state. */
+const loaded = atom({ plugin: 'human-tasks', key: 'loaded' } as const, false)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
 
 type TaskInput = {
@@ -83,7 +85,25 @@ async function persist($: Engine) {
   await $.store.set(await storeKey($), await read($, board))
 }
 
+/** Load the saved board and mode into the live state. State resets on /clear; the store does not. */
+async function restoreState($: Engine) {
+  const saved = (await $.store.get(await storeKey($))) as Board | undefined
+  if (saved && Array.isArray(saved.tasks)) {
+    const nextId = typeof saved.nextId === 'number' ? saved.nextId : saved.tasks.length + 1
+    await update($, board, () => ({ tasks: saved.tasks, nextId }))
+  }
+  const savedMode = await $.store.get(MODE_KEY)
+  if (savedMode === 'auto' || savedMode === 'manual') await update($, mode, () => savedMode)
+  await update($, loaded, () => true)
+}
+
+/** Restore once per state lifetime, so nothing persists an unloaded board over the stored one. */
+async function ensureLoaded($: Engine) {
+  if (!(await read($, loaded))) await restoreState($)
+}
+
 async function mutate($: Engine, fn: (b: Board) => Board) {
+  await ensureLoaded($)
   await update($, board, fn)
   await persist($)
 }
@@ -181,16 +201,8 @@ async function listTasks($: Engine) {
 
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
-    const saved = (await $.store.get(await storeKey($))) as Board | undefined
-    if (saved && Array.isArray(saved.tasks)) {
-      const nextId = typeof saved.nextId === 'number' ? saved.nextId : saved.tasks.length + 1
-      await update($, board, () => ({ tasks: saved.tasks, nextId }))
-    }
-
-    const savedMode = await $.store.get(MODE_KEY)
-    if (savedMode === 'auto' || savedMode === 'manual') {
-      await update($, mode, () => savedMode)
-    } else {
+    await restoreState($)
+    if ((await read($, mode)) === 'unset') {
       $.ui.toast(`human-tasks: run /${COMMAND} to choose whether Claude uses the task pane automatically`)
     }
 
@@ -230,7 +242,15 @@ export const register: Register = (on) => {
     return next(e)
   })
 
+  // /clear resets the state but not the store, and session.start never fires for it
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (e.source === 'clear') await restoreState($)
+    return result
+  })
+
   on('tool.call', { tool: 'mcp__human-tasks__task' }, async ($, e) => {
+    await ensureLoaded($)
     const input = e as unknown as TaskInput
     switch (input.action ?? 'post') {
       case 'post':
@@ -255,6 +275,7 @@ export const register: Register = (on) => {
   })
 
   on('command.run', { command: COMMAND }, async ($) => {
+    await ensureLoaded($)
     await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true, rows: PANE_ROWS })
     return {}
   })
