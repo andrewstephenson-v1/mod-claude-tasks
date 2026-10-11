@@ -316,3 +316,26 @@ test('a reopen the engine leaves undrawn says why in the transcript', async ($, 
   await $.classic.SessionStart({ source: 'clear' })
   expect(lines.some((l) => l.includes('too narrow'))).toBe(true)
 })
+
+test('list shows recent finished tasks with short answers, and an id in full', async ($, on) => {
+  const log = 'line of pasted output\n'.repeat(200)
+  const tasks = Array.from({ length: 8 }, (_, i) => ({
+    id: i + 1, title: `Task ${i + 1}`, steps: [{ text: 'Run it', command: 'make check' }], expect: '', options: [],
+    status: i < 7 ? 'replied' : 'open', answer: log,
+  }))
+  memoryStore(on, { 'tasks:/test/project': { tasks, nextId: 9 } })
+  stubProject(on)
+  stubUi(on)
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#8 [open] Task 8')
+  expect(listed).toContain('#7 [replied] Task 7')
+  expect(listed).toContain('#3 [replied] Task 3')
+  expect(listed.includes('#2 [replied]')).toBe(false)
+  expect(listed).toContain('2 older finished tasks not shown')
+  expect(listed.length < 1500).toBe(true)
+  const all = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', all: true })).result)
+  expect(all).toContain('#1 [replied] Task 1')
+  const one = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', id: 2 })).result)
+  expect(one).toContain('1. Run it `make check`')
+  expect(one).toContain(log.trim())
+})

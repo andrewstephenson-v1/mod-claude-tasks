@@ -17,7 +17,7 @@ The first time you open the pane (`/human-tasks`) it asks whether Claude should 
 ## Usage
 
 - `/human-tasks` opens the pane, with **Open** and **Completed** tabs. Finished tasks move to Completed, where **Clear completed** lives and each task expands when you press its title. A line separates tasks.
-- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove`, `complete` or `list`. The mod registers it itself; there is no separate MCP server.
+- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove`, `complete` or `list`. `list` stays short: open tasks plus the five most recent finished ones, with answers cut to a line; `all: true` lists every finished task and `id` shows one task in full. The mod registers it itself; there is no separate MCP server.
 - Tasks are stored per project (keyed by the session's project root) and survive restarts. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
 
 ## Install
