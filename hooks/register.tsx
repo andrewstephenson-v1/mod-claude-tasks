@@ -19,6 +19,10 @@ const MAX_OPTIONS = 6
 const PANE_ROWS = 24
 /** Finished tasks kept in the store; older ones are dropped. */
 const MAX_FINISHED = 50
+/** Finished tasks "list" shows unless asked for all of them. */
+const LIST_RECENT_FINISHED = 5
+/** Characters of each answer "list" shows; "list" with an id shows the whole answer. */
+const LIST_ANSWER_CHARS = 120
 
 const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: [], nextId: 1 } as Board)
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
@@ -36,6 +40,7 @@ type TaskInput = {
   note?: unknown
   expect?: unknown
   options?: unknown
+  all?: unknown
 }
 
 /** Not per project: the choice follows the user. */
@@ -196,15 +201,42 @@ async function completeTask($: Engine, id: number, note: unknown) {
   return { result: `Marked task #${id} done.` }
 }
 
-async function listTasks($: Engine) {
+/** Collapse whitespace and cut long answers: a reply can hold a whole pasted log, and Claude saw it in full when it arrived. */
+function brief(text: string, max = LIST_ANSWER_CHARS) {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
+}
+
+const listLine = (t: Task) => `#${t.id} [${t.status}] ${t.title}${t.answer ? ` (answer: ${brief(t.answer)})` : ''}`
+
+/** One task in full: its steps, what to expect, its outcomes and the whole answer. */
+function describeTask(t: Task) {
+  const lines = [`#${t.id} [${t.status}] ${t.title}`]
+  t.steps.forEach((s, i) => {
+    lines.push(`${i + 1}. ${[s.text, s.command && `\`${s.command}\``].filter(Boolean).join(' ')}`)
+  })
+  if (t.expect) lines.push(`Expect: ${t.expect}`)
+  if (t.options.length) lines.push(`Options: ${t.options.join(' | ')}`)
+  if (t.answer) lines.push(`Answer:\n${t.answer}`)
+  return lines.join('\n')
+}
+
+async function listTasks($: Engine, input: TaskInput) {
   const { tasks } = await read($, board)
   const visible = tasks.filter((t) => t.status !== 'removed')
-  if (visible.length === 0) return { result: 'No tasks.' }
-  return {
-    result: visible
-      .map((t) => `#${t.id} [${t.status}] ${t.title}${t.answer ? ` (answer: ${t.answer})` : ''}`)
-      .join('\n'),
+  if (input.id !== undefined) {
+    const id = Number(input.id)
+    const found = visible.find((t) => t.id === id)
+    return { result: found ? describeTask(found) : `No task #${id}.` }
   }
+  if (visible.length === 0) return { result: 'No tasks.' }
+  const open = visible.filter((t) => t.status === 'open')
+  const finished = visible.filter(isFinished)
+  const shown = input.all === true ? finished : finished.slice(-LIST_RECENT_FINISHED)
+  const hidden = finished.length - shown.length
+  const lines = [...open, ...shown].map(listLine)
+  if (hidden > 0) lines.push(`(${hidden} older finished task${hidden === 1 ? '' : 's'} not shown; pass all: true to list them)`)
+  return { result: lines.join('\n') }
 }
 
 /** Open the pane again after /clear; says why in the transcript if the engine leaves it undrawn. */
@@ -228,7 +260,7 @@ export const register: Register = (on) => {
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`); "list" shows tasks, statuses and answers.',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`); "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -248,7 +280,8 @@ export const register: Register = (on) => {
             items: { type: 'string' },
             description: `post: known outcomes offered as buttons (max ${MAX_OPTIONS})`,
           },
-          id: { type: 'number', description: 'remove or complete: task id' },
+          id: { type: 'number', description: 'remove or complete: task id; list: show that one task in full' },
+          all: { type: 'boolean', description: 'list: include every finished task, not just the most recent' },
           note: { type: 'string', description: 'complete: what the user confirmed, in a few words' },
         },
       },
@@ -298,7 +331,7 @@ export const register: Register = (on) => {
       case 'complete':
         return completeTask($, Number(input.id), input.note)
       case 'list':
-        return listTasks($)
+        return listTasks($, input)
       default:
         return { result: 'Unknown action. Use post, remove, complete or list.' }
     }
