@@ -238,6 +238,38 @@ test('completed tasks expand and collapse when their title is pressed', async ($
   expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeUndefined()
 })
 
+test('open tasks start expanded and fold to their title when pressed', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({
+    tool: 'mcp__human-tasks__task', action: 'post', title: 'Check',
+    steps: [{ text: 'Run it', command: 'echo open-marker' }],
+    options: ['Worked'],
+  })
+  const pane = await $.ui.mount({
+    plugin: 'human-tasks',
+    surface: 'terminal',
+    component: 'Pane',
+    props: {
+      title: 'Tasks for you',
+      isFocused: false,
+      bodyColumns: 80,
+      placement: 'dock',
+      scroll: { offset: 0, max: 0 } as never,
+      view: {} as never,
+    },
+    requestId: 'human-tasks',
+  })
+  expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeDefined()
+  await pane.press({ key: 'open-toggle-1' })
+  expect(await pane.find({ type: 'Button', key: 'open-toggle-1' })).toBeDefined()
+  expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeUndefined()
+  await pane.press({ key: 'open-toggle-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeDefined()
+})
+
 const SAVED = {
   tasks: [
     { id: 1, title: 'Old open', steps: [], expect: '', options: [], status: 'open', answer: '' },

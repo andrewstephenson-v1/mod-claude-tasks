@@ -28,6 +28,7 @@ const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: []
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
 const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
 const expandedIds = atom({ plugin: 'human-tasks', key: 'expandedIds' } as const, [] as number[])
+const collapsedIds = atom({ plugin: 'human-tasks', key: 'collapsedIds' } as const, [] as number[])
 /** False until the board is restored from the store; /clear resets it with the rest of the state. */
 const loaded = atom({ plugin: 'human-tasks', key: 'loaded' } as const, false)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
@@ -54,6 +55,8 @@ Check tasks off as you learn they are done. If the user confirms in chat, or pas
 const label = (t: Task) => `#${t.id} "${t.title}"`
 
 const isFinished = (t: Task) => t.status !== 'open' && t.status !== 'removed'
+
+const toggleId = (id: number) => (ids: number[]) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id])
 
 function parseSteps(raw: unknown): Task['steps'] {
   if (!Array.isArray(raw)) return []
@@ -368,6 +371,7 @@ export const register: Register = (on) => {
     const currentMode = await read($, mode)
     const currentTab = await read($, tab)
     const expanded = await read($, expandedIds)
+    const collapsed = await read($, collapsedIds)
     const open = tasks.filter((t) => t.status === 'open')
     // Newest first
     const finished = tasks.filter(isFinished).reverse()
@@ -439,9 +443,7 @@ export const register: Register = (on) => {
                   <Button
                     key={`toggle-${t.id}`}
                     label={`${isOpen ? '▾' : '▸'} ✓ #${t.id}  ${t.title}`}
-                    onPress={() =>
-                      update($, expandedIds, (ids) => (ids.includes(t.id) ? ids.filter((i) => i !== t.id) : [...ids, t.id]))
-                    }
+                    onPress={() => update($, expandedIds, toggleId(t.id))}
                   />
                 </Box>
                 {isOpen && (
@@ -473,78 +475,91 @@ export const register: Register = (on) => {
         {tabs}
         {onboarding}
         {open.length === 0 && <Text dimColor>Nothing for you to do right now.</Text>}
-        {open.map((t, idx) => (
-          <Box key={`task-${t.id}`} flexDirection="column">
-            {idx > 0 && rule(`rule-${t.id}`)}
-            <Text bold>{`#${t.id}  ${t.title}`}</Text>
-            {t.steps.map((s, i) => (
-              <Box key={`step-${i}`} flexDirection="column">
-                {s.text && <Text wrap="wrap">{`${i + 1}. ${s.text}`}</Text>}
-                {s.command && e.surface === 'terminal' && (
-                  <Button
-                    key={`copy-${t.id}-${i}`}
-                    label="Copy"
-                    onPress={async (press) => {
-                      // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
-                      const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
-                      $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
-                    }}
-                  />
-                )}
-                {s.command && <Code source={s.command} language="sh" />}
+        {open.map((t, idx) => {
+          const isCollapsed = collapsed.includes(t.id)
+          return (
+            <Box key={`task-${t.id}`} flexDirection="column">
+              {idx > 0 && rule(`rule-${t.id}`)}
+              <Box flexDirection="row">
+                <Button
+                  key={`open-toggle-${t.id}`}
+                  label={`${isCollapsed ? '▸' : '▾'} #${t.id}  ${t.title}`}
+                  onPress={() => update($, collapsedIds, toggleId(t.id))}
+                />
               </Box>
-            ))}
-            {t.expect && (
-              <Text dimColor wrap="wrap">
-                {`Expect: ${t.expect}`}
-              </Text>
-            )}
-            <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-              <Button
-                label="Done"
-                onPress={() =>
-                  resolveTask($, t.id, 'done', '', (r) => `The user ticked off task ${label(r)} as done.`)
-                }
-              />
-              {t.options.map((opt, j) => (
-                <Button
-                  key={`opt-${j}`}
-                  label={opt}
-                  onPress={() =>
-                    resolveTask($, t.id, 'chosen', opt, (r) => `For task ${label(r)} the user chose: "${opt}".`)
-                  }
-                />
-              ))}
-              {Input && (
-                <Button
-                  label={replying === t.id ? 'Cancel reply' : 'Reply'}
-                  onPress={() => update($, replyingId, (cur) => (cur === t.id ? null : t.id))}
-                />
+              {!isCollapsed && (
+                <Box flexDirection="column">
+                  {t.steps.map((s, i) => (
+                    <Box key={`step-${i}`} flexDirection="column">
+                      {s.text && <Text wrap="wrap">{`${i + 1}. ${s.text}`}</Text>}
+                      {s.command && e.surface === 'terminal' && (
+                        <Button
+                          key={`copy-${t.id}-${i}`}
+                          label="Copy"
+                          onPress={async (press) => {
+                            // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
+                            const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
+                            $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
+                          }}
+                        />
+                      )}
+                      {s.command && <Code source={s.command} language="sh" />}
+                    </Box>
+                  ))}
+                  {t.expect && (
+                    <Text dimColor wrap="wrap">
+                      {`Expect: ${t.expect}`}
+                    </Text>
+                  )}
+                  <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+                    <Button
+                      label="Done"
+                      onPress={() =>
+                        resolveTask($, t.id, 'done', '', (r) => `The user ticked off task ${label(r)} as done.`)
+                      }
+                    />
+                    {t.options.map((opt, j) => (
+                      <Button
+                        key={`opt-${j}`}
+                        label={opt}
+                        onPress={() =>
+                          resolveTask($, t.id, 'chosen', opt, (r) => `For task ${label(r)} the user chose: "${opt}".`)
+                        }
+                      />
+                    ))}
+                    {Input && (
+                      <Button
+                        label={replying === t.id ? 'Cancel reply' : 'Reply'}
+                        onPress={() => update($, replyingId, (cur) => (cur === t.id ? null : t.id))}
+                      />
+                    )}
+                  </Box>
+                  {Input && replying === t.id && (
+                    <Input
+                      key={`input-${t.id}`}
+                      label="Reply"
+                      placeholder="What happened? Paste output or describe it"
+                      value=""
+                      submitLabel="send"
+                      autoFocus
+                      onSubmit={async (value: unknown) => {
+                        const text = String(value ?? '').trim()
+                        if (!text) return
+                        await resolveTask(
+                          $,
+                          t.id,
+                          'replied',
+                          text,
+                          (r) => `The user replied on task ${label(r)}:\n\n${text}`,
+                        )
+                      }}
+                    />
+                  )}
+                </Box>
               )}
             </Box>
-            {Input && replying === t.id && (
-              <Input
-                key={`input-${t.id}`}
-                label="Reply"
-                placeholder="What happened? Paste output or describe it"
-                value=""
-                submitLabel="send"
-                autoFocus
-                onSubmit={async (value: unknown) => {
-                  const text = String(value ?? '').trim()
-                  if (!text) return
-                  await resolveTask(
-                    $,
-                    t.id,
-                    'replied',
-                    text,
-                    (r) => `The user replied on task ${label(r)}:\n\n${text}`,
-                  )
-                }}
-              />
-            )}
-          </Box>
-        ))}
+          )
+        })}
       </Box>
     )
   })

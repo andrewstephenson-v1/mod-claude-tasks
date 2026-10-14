@@ -32,6 +32,8 @@ declare module 'claude-code' {
       tab: Tab
       /** Ids of completed tasks shown expanded. */
       expandedIds: number[]
+      /** Ids of open tasks folded down to their title line. */
+      collapsedIds: number[]
     }
   }
 }
