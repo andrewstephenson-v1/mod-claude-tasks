@@ -77,6 +77,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       },
       requestId: 'human-tasks',
     })
+    await pane.press({ key: 'open-toggle-1' })
     expect(await pane.find({ type: 'Code', text: 'date' })).toBeDefined()
     expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeDefined()
     // The desktop's code block has its own copy control, so only the terminal gets a button
@@ -238,7 +239,7 @@ test('completed tasks expand and collapse when their title is pressed', async ($
   expect(await pane.find({ type: 'Code', text: 'echo expanded-marker' })).toBeUndefined()
 })
 
-test('open tasks start expanded and fold to their title when pressed', async ($, on) => {
+test('open tasks start folded to their title and expand when pressed', async ($, on) => {
   memoryStore(on)
   stubProject(on)
   stubUi(on)
@@ -261,13 +262,14 @@ test('open tasks start expanded and fold to their title when pressed', async ($,
     },
     requestId: 'human-tasks',
   })
-  expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeDefined()
-  await pane.press({ key: 'open-toggle-1' })
   expect(await pane.find({ type: 'Button', key: 'open-toggle-1' })).toBeDefined()
   expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeUndefined()
   await pane.press({ key: 'open-toggle-1' })
   expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'opt-0' })).toBeDefined()
+  await pane.press({ key: 'open-toggle-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo open-marker' })).toBeUndefined()
 })
 
 const SAVED = {

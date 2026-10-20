@@ -28,7 +28,8 @@ const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: []
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
 const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
 const expandedIds = atom({ plugin: 'human-tasks', key: 'expandedIds' } as const, [] as number[])
-const collapsedIds = atom({ plugin: 'human-tasks', key: 'collapsedIds' } as const, [] as number[])
+/** Open tasks start folded to their title; these are the ones the user has unfolded. */
+const openExpandedIds = atom({ plugin: 'human-tasks', key: 'openExpandedIds' } as const, [] as number[])
 /** False until the board is restored from the store; /clear resets it with the rest of the state. */
 const loaded = atom({ plugin: 'human-tasks', key: 'loaded' } as const, false)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
@@ -371,7 +372,7 @@ export const register: Register = (on) => {
     const currentMode = await read($, mode)
     const currentTab = await read($, tab)
     const expanded = await read($, expandedIds)
-    const collapsed = await read($, collapsedIds)
+    const openExpanded = await read($, openExpandedIds)
     const open = tasks.filter((t) => t.status === 'open')
     // Newest first
     const finished = tasks.filter(isFinished).reverse()
@@ -476,7 +477,7 @@ export const register: Register = (on) => {
         {onboarding}
         {open.length === 0 && <Text dimColor>Nothing for you to do right now.</Text>}
         {open.map((t, idx) => {
-          const isCollapsed = collapsed.includes(t.id)
+          const isCollapsed = !openExpanded.includes(t.id)
           return (
             <Box key={`task-${t.id}`} flexDirection="column">
               {idx > 0 && rule(`rule-${t.id}`)}
@@ -484,7 +485,7 @@ export const register: Register = (on) => {
                 <Button
                   key={`open-toggle-${t.id}`}
                   label={`${isCollapsed ? '▸' : '▾'} #${t.id}  ${t.title}`}
-                  onPress={() => update($, collapsedIds, toggleId(t.id))}
+                  onPress={() => update($, openExpandedIds, toggleId(t.id))}
                 />
               </Box>
               {!isCollapsed && (
