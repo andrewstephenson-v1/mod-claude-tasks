@@ -526,3 +526,26 @@ test('a reply goes to Claude and leaves the task open', async ($, on) => {
   expect(listed).toContain('#1 [open] Check (answer: it printed Friday)')
   expect(await pane.find({ type: 'Input', key: 'input-1' })).toBeUndefined()
 })
+
+test('an outcome named Done or Reply is not drawn twice', async ($, on) => {
+  const saved = {
+    tasks: [{ id: 1, title: 'Old', steps: [{ text: 'Run', command: 'date' }], expect: '', options: ['Done', 'Skip'], status: 'open', answer: '' }],
+    nextId: 2,
+  }
+  memoryStore(on, { 'tasks:/test/project': saved })
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({
+    tool: 'mcp__human-tasks__task', action: 'post', title: 'New', options: ['done', '[ Reply ]', 'Skip', 'skip', 'Retry'],
+  })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'open-toggle-2' })
+  const labels = (await pane.findAll({ type: 'Button' })).map((b) => JSON.stringify(b))
+  expect(labels.filter((l) => l.includes('"Done"')).length).toBe(2)
+  expect(labels.filter((l) => l.includes('"Skip"')).length).toBe(2)
+  expect(labels.filter((l) => l.includes('"Retry"')).length).toBe(1)
+  expect(labels.some((l) => l.includes('[ Reply ]'))).toBe(false)
+  const one = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', id: 2 })).result)
+  expect(one).toContain('Options: Skip | Retry')
+})
