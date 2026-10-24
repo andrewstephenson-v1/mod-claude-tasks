@@ -1,6 +1,15 @@
 export type TaskStatus = 'open' | 'done' | 'chosen' | 'replied' | 'removed'
 
-export type TaskStep = { text: string; command: string }
+export type TaskStep = {
+  text: string
+  command: string
+  /** Short label shown in the progress row and title line, e.g. "Build". */
+  name?: string
+  /** What the user should see if this step worked. */
+  expect?: string
+  /** What means stop here and tell Claude. */
+  stop?: string
+}
 
 export type Task = {
   id: number
@@ -10,6 +19,10 @@ export type Task = {
   options: string[]
   status: TaskStatus
   answer: string
+  /** Indexes of the steps the user has marked done; missing on tasks saved before step progress. */
+  stepsDone?: number[]
+  /** Step the user is looking at, when they moved off the first unfinished one with Back. */
+  current?: number
 }
 
 /** Whether Claude uses the pane on its own: `unset` until the user answers the onboarding card. */

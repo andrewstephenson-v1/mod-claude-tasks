@@ -43,6 +43,7 @@ type TaskInput = {
   expect?: unknown
   options?: unknown
   all?: unknown
+  step?: unknown
 }
 
 /** Not per project: the choice follows the user. */
@@ -53,7 +54,33 @@ const AUTO_GUIDANCE = `# human-tasks pane
 When you need the user to do something only they can do (run a command in their own terminal, check a console or dashboard, make a decision, supply a value), post it with the mcp__human-tasks__task tool instead of asking in chat. One task per independent action, in order.
 Check tasks off as you learn they are done. If the user confirms in chat, or pastes output that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.`
 
-const label = (t: Task) => `#${t.id} "${t.title}"`
+const label = (t: Task) => `#${t.id} "${t.title}"${where(t)}`
+
+/** Tasks with more than one step are walked one step at a time and remember where the user is. */
+const isStepper = (t: Task) => t.steps.length > 1
+
+const stepName = (t: Task, i: number) => t.steps[i]?.name || `Step ${i + 1}`
+
+const doneSteps = (t: Task) => t.stepsDone ?? []
+
+/** The step on screen: the one the user went Back to, else the first unfinished one; steps.length once all are done. */
+function currentStep(t: Task) {
+  if (typeof t.current === 'number' && t.current >= 0 && t.current < t.steps.length) return t.current
+  const done = doneSteps(t)
+  const next = t.steps.findIndex((_, i) => !done.includes(i))
+  return next === -1 ? t.steps.length : next
+}
+
+/** Where the user is in a stepped task, e.g. "step 4 of 8, Inputs". */
+function progress(t: Task) {
+  const cur = currentStep(t)
+  if (cur >= t.steps.length) return `all ${t.steps.length} steps done`
+  const name = t.steps[cur].name
+  return `step ${cur + 1} of ${t.steps.length}${name ? `, ${name}` : ''}`
+}
+
+/** Tells Claude which step a reply or outcome came from. */
+const where = (t: Task) => (isStepper(t) ? ` (${progress(t)})` : '')
 
 const isFinished = (t: Task) => t.status !== 'open' && t.status !== 'removed'
 
@@ -66,6 +93,9 @@ function parseSteps(raw: unknown): Task['steps'] {
     .map((s) => ({
       text: s.text ? String(s.text) : '',
       command: s.command ? String(s.command) : '',
+      ...(s.name ? { name: String(s.name) } : {}),
+      ...(s.expect ? { expect: String(s.expect) } : {}),
+      ...(s.stop ? { stop: String(s.stop) } : {}),
     }))
     .filter((s) => s.text || s.command)
 }
@@ -151,6 +181,29 @@ async function resolveTask(
   void $.prompt.submit({ text: message(resolved) })
 }
 
+/** Mark the step on screen done and move to the next unfinished one; stays quiet, so the user can switch tasks freely. */
+async function nextStep($: Engine, id: number) {
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) => {
+      if (t.id !== id || t.status !== 'open') return t
+      const cur = currentStep(t)
+      if (cur >= t.steps.length) return t
+      const stepsDone = [...new Set([...doneSteps(t), cur])].sort((x, y) => x - y)
+      return { ...t, stepsDone, current: undefined }
+    }),
+  }))
+}
+
+async function backStep($: Engine, id: number) {
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) =>
+      t.id === id && t.status === 'open' ? { ...t, current: Math.max(0, currentStep(t) - 1) } : t,
+    ),
+  }))
+}
+
 async function clearCompleted($: Engine) {
   await mutate($, (b) => ({ ...b, tasks: b.tasks.filter((t) => !isFinished(t)) }))
 }
@@ -190,11 +243,25 @@ async function removeTask($: Engine, id: number) {
   return { result: `Removed task #${id}.` }
 }
 
-async function completeTask($: Engine, id: number, note: unknown) {
+async function completeTask($: Engine, id: number, note: unknown, step: unknown) {
   const { tasks } = await read($, board)
   const found = tasks.find((t) => t.id === id)
   if (!found || found.status === 'removed') return { result: `No task #${id}.` }
   if (found.status !== 'open') return { result: `Task #${id} is already ${found.status}.` }
+  if (step !== undefined) {
+    const n = Number(step)
+    if (!Number.isInteger(n) || n < 1 || n > found.steps.length) return { result: `Task #${id} has no step ${String(step)}.` }
+    await mutate($, (b) => ({
+      ...b,
+      tasks: b.tasks.map((t) =>
+        t.id === id
+          ? { ...t, stepsDone: [...new Set([...doneSteps(t), n - 1])].sort((x, y) => x - y), current: undefined }
+          : t,
+      ),
+    }))
+    const updated = (await read($, board)).tasks.find((t) => t.id === id)
+    return { result: `Marked step ${n} of task #${id} done; now at ${updated ? progress(updated) : 'the next step'}.` }
+  }
   const text = typeof note === 'string' ? note.trim() : ''
   await mutate($, (b) => ({
     ...b,
@@ -211,13 +278,17 @@ function brief(text: string, max = LIST_ANSWER_CHARS) {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
-const listLine = (t: Task) => `#${t.id} [${t.status}] ${t.title}${t.answer ? ` (answer: ${brief(t.answer)})` : ''}`
+const listLine = (t: Task) =>
+  `#${t.id} [${t.status}] ${t.title}${t.status === 'open' ? where(t) : ''}${t.answer ? ` (answer: ${brief(t.answer)})` : ''}`
 
 /** One task in full: its steps, what to expect, its outcomes and the whole answer. */
 function describeTask(t: Task) {
-  const lines = [`#${t.id} [${t.status}] ${t.title}`]
+  const lines = [`#${t.id} [${t.status}] ${t.title}${t.status === 'open' ? where(t) : ''}`]
   t.steps.forEach((s, i) => {
-    lines.push(`${i + 1}. ${[s.text, s.command && `\`${s.command}\``].filter(Boolean).join(' ')}`)
+    const mark = isStepper(t) && doneSteps(t).includes(i) ? ' [done]' : ''
+    lines.push(`${i + 1}.${mark} ${[s.name && `${s.name}:`, s.text, s.command && `\`${s.command}\``].filter(Boolean).join(' ')}`)
+    if (s.expect) lines.push(`   Expect: ${s.expect}`)
+    if (s.stop) lines.push(`   Stop if: ${s.stop}`)
   })
   if (t.expect) lines.push(`Expect: ${t.expect}`)
   if (t.options.length) lines.push(`Options: ${t.options.join(' | ')}`)
@@ -264,7 +335,7 @@ export const register: Register = (on) => {
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`); "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -272,10 +343,16 @@ export const register: Register = (on) => {
           title: { type: 'string', description: 'post: short imperative title' },
           steps: {
             type: 'array',
-            description: 'post: ordered steps, each with prose `text`, a shell `command` (shown as a code block with a copy control), or both. Keep each command short enough to fit on one line; for anything longer, write a script file and post the command that runs it, because the user pastes these into a terminal',
+            description: 'post: ordered steps, each with prose `text`, a shell `command` (shown as a code block with a copy control), or both. Keep each command short enough to fit on one line; for anything longer, write a script file and post the command that runs it, because the user pastes these into a terminal. A task with several steps is shown one step at a time and remembers where the user is, so give each step a short `name`, and put its success line in `expect` and its abort condition in `stop` rather than in `text`',
             items: {
               type: 'object',
-              properties: { text: { type: 'string' }, command: { type: 'string' } },
+              properties: {
+                name: { type: 'string', description: 'a few words, e.g. "Build"' },
+                text: { type: 'string' },
+                command: { type: 'string' },
+                expect: { type: 'string', description: 'what this step prints if it worked' },
+                stop: { type: 'string', description: 'what means stop and tell Claude' },
+              },
             },
           },
           expect: { type: 'string', description: 'post: what the user should see if it worked' },
@@ -287,6 +364,7 @@ export const register: Register = (on) => {
           id: { type: 'number', description: 'remove or complete: task id; list: show that one task in full' },
           all: { type: 'boolean', description: 'list: include every finished task, not just the most recent' },
           note: { type: 'string', description: 'complete: what the user confirmed, in a few words' },
+          step: { type: 'number', description: 'complete: check off only this step (1-based) of task `id`, leaving the task open' },
         },
       },
     })
@@ -333,7 +411,7 @@ export const register: Register = (on) => {
       case 'remove':
         return removeTask($, Number(input.id))
       case 'complete':
-        return completeTask($, Number(input.id), input.note)
+        return completeTask($, Number(input.id), input.note, input.step)
       case 'list':
         return listTasks($, input)
       default:
@@ -386,6 +464,61 @@ export const register: Register = (on) => {
       ) : (
         <Markdown key={key} text="---" dimColor />
       )
+
+    const stepBody = (t: Task, s: Task['steps'][number], i: number, prefix: string) => (
+      <Box key={`step-${t.id}-${i}`} flexDirection="column">
+        {s.name && isStepper(t) && <Text bold wrap="wrap">{`${stepName(t, i)}`}</Text>}
+        {s.text && <Text wrap="wrap">{`${prefix}${s.name && !isStepper(t) ? `${s.name}: ` : ''}${s.text}`}</Text>}
+        {!s.text && s.name && !isStepper(t) && <Text wrap="wrap">{`${prefix}${s.name}`}</Text>}
+        {s.command && e.surface === 'terminal' && (
+          <Button
+            key={`copy-${t.id}-${i}`}
+            label="Copy"
+            onPress={async (press) => {
+              // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
+              const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
+              $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
+            }}
+          />
+        )}
+        {s.command && <Code source={s.command} language="sh" />}
+        {s.expect && <Text wrap="wrap">{`✓ Expect: ${s.expect}`}</Text>}
+        {s.stop && <Text wrap="wrap">{`✋ Stop if: ${s.stop}`}</Text>}
+      </Box>
+    )
+
+    /** One step at a time: a progress row, the step on screen in full, then Next and Back. */
+    const stepper = (t: Task) => {
+      const cur = currentStep(t)
+      const done = doneSteps(t)
+      const row = t.steps
+        .map((_, i) => `${done.includes(i) ? '✓' : i === cur ? '●' : '○'} ${t.steps[i].name || i + 1}`)
+        .join('  ')
+      const allDone = cur >= t.steps.length
+      return (
+        <Box key={`stepper-${t.id}`} flexDirection="column">
+          <Text dimColor wrap="wrap">{row}</Text>
+          {allDone ? (
+            <Text wrap="wrap">{`All ${t.steps.length} steps done. Press Done or pick an outcome below.`}</Text>
+          ) : (
+            <Box flexDirection="column">
+              <Text dimColor>{`Step ${cur + 1} of ${t.steps.length}${done.includes(cur) ? ' (done)' : ''}`}</Text>
+              {stepBody(t, t.steps[cur], cur, '')}
+            </Box>
+          )}
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+            {!allDone && (
+              <Button
+                key={`step-next-${t.id}`}
+                label={cur === t.steps.length - 1 ? '✓ Looks right, last step' : '✓ Looks right, next'}
+                onPress={() => nextStep($, t.id)}
+              />
+            )}
+            {cur > 0 && <Button key={`step-back-${t.id}`} label="‹ Back" onPress={() => backStep($, t.id)} />}
+          </Box>
+        </Box>
+      )
+    }
 
     const tabButton = (id: Tab, name: string, count: number) => (
       <Button
@@ -484,30 +617,14 @@ export const register: Register = (on) => {
               <Box flexDirection="row">
                 <Button
                   key={`open-toggle-${t.id}`}
-                  label={`${isCollapsed ? '▸' : '▾'} #${t.id}  ${t.title}`}
+                  label={`${isCollapsed ? '▸' : '▾'} #${t.id}  ${t.title}${isStepper(t) ? `  · ${progress(t)}` : ''}`}
                   onPress={() => update($, openExpandedIds, toggleId(t.id))}
                 />
               </Box>
               {!isCollapsed && (
                 <Box flexDirection="column">
-                  {t.steps.map((s, i) => (
-                    <Box key={`step-${i}`} flexDirection="column">
-                      {s.text && <Text wrap="wrap">{`${i + 1}. ${s.text}`}</Text>}
-                      {s.command && e.surface === 'terminal' && (
-                        <Button
-                          key={`copy-${t.id}-${i}`}
-                          label="Copy"
-                          onPress={async (press) => {
-                            // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
-                            const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
-                            $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
-                          }}
-                        />
-                      )}
-                      {s.command && <Code source={s.command} language="sh" />}
-                    </Box>
-                  ))}
-                  {t.expect && (
+                  {isStepper(t) ? stepper(t) : t.steps.map((st, i) => stepBody(t, st, i, `${i + 1}. `))}
+                  {t.expect && (!isStepper(t) || currentStep(t) >= t.steps.length - 1) && (
                     <Text dimColor wrap="wrap">
                       {`Expect: ${t.expect}`}
                     </Text>

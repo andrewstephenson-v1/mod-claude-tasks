@@ -373,3 +373,91 @@ test('list shows recent finished tasks with short answers, and an id in full', a
   expect(one).toContain('1. Run it `make check`')
   expect(one).toContain(log.trim())
 })
+
+const STEPS = [
+  { name: 'Setup', command: 'echo setup-marker', expect: 'S is set' },
+  { name: 'Build', command: 'echo build-marker', stop: 'any STOP line' },
+  { name: 'Run', command: 'echo run-marker' },
+]
+
+async function mountPane($: Parameters<Parameters<typeof test>[1]>[0]) {
+  return $.ui.mount({
+    plugin: 'human-tasks',
+    surface: 'terminal',
+    component: 'Pane',
+    props: {
+      title: 'Tasks for you',
+      isFocused: false,
+      bodyColumns: 80,
+      placement: 'dock',
+      scroll: { offset: 0, max: 0 } as never,
+      view: {} as never,
+    },
+    requestId: 'human-tasks',
+  })
+}
+
+test('a multi-step task shows one step at a time and remembers where the user is', async ($, on) => {
+  const store = memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeDefined()
+  expect(await pane.find({ type: 'Code', text: 'echo build-marker' })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'step-back-1' })).toBeUndefined()
+  await pane.press({ key: 'step-next-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeUndefined()
+  expect(await pane.find({ type: 'Code', text: 'echo build-marker' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✋ Stop if: any STOP line' })).toBeDefined()
+  // Progress is stored, so leaving for another task or restarting keeps the place
+  const saved = store.get('tasks:/test/project') as { tasks: { stepsDone?: number[] }[] }
+  expect(JSON.stringify(saved.tasks[0].stepsDone)).toBe('[0]')
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] Runbook (step 2 of 3, Build)')
+  await pane.press({ key: 'step-back-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeDefined()
+})
+
+test('the folded title line shows the step the user is on', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, step: 1 })
+  const pane = await mountPane($)
+  const title = await pane.find({ type: 'Button', key: 'open-toggle-1' })
+  expect(JSON.stringify(title)).toContain('step 2 of 3, Build')
+})
+
+test('complete with a step checks off that step and leaves the task open', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const res = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, step: 1 })).result)
+  expect(res).toContain('Marked step 1 of task #1 done; now at step 2 of 3, Build')
+  const bad = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, step: 7 })).result)
+  expect(bad).toContain('has no step 7')
+  const one = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', id: 1 })).result)
+  expect(one).toContain('1. [done] Setup: `echo setup-marker`')
+  expect(one).toContain('Stop if: any STOP line')
+})
+
+test('a reply on a multi-step task tells Claude which step it came from', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { drop: 'captured by the test' } as never
+  })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS, options: ['Saw a STOP'] })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'step-next-1' })
+  await pane.press({ key: 'opt-0' })
+  expect(sent.join('\n')).toContain('(step 2 of 3, Build) the user chose: "Saw a STOP"')
+})
