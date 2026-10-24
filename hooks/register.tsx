@@ -103,9 +103,24 @@ function parseSteps(raw: unknown): Task['steps'] {
     .filter((s) => s.text || s.command)
 }
 
+/** The pane always draws Done and Reply, so an outcome with either name would show twice. */
+const BUILT_IN_BUTTONS = new Set(['done', 'reply'])
+const buttonName = (label: string) => label.trim().toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+
+/** Drop outcomes that repeat a built-in button or an earlier outcome. */
+function distinctOptions(options: string[]): string[] {
+  const seen = new Set(BUILT_IN_BUTTONS)
+  return options.filter((o) => {
+    const name = buttonName(o)
+    if (!name || seen.has(name)) return false
+    seen.add(name)
+    return true
+  })
+}
+
 function parseOptions(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
-  return raw.map(String).filter(Boolean).slice(0, MAX_OPTIONS)
+  return distinctOptions(raw.map(String).filter(Boolean)).slice(0, MAX_OPTIONS)
 }
 
 /** Drop removed tasks and cap the finished ones so the store cannot grow without bound. */
@@ -431,7 +446,7 @@ export const register: Register = (on) => {
           options: {
             type: 'array',
             items: { type: 'string' },
-            description: `post: known outcomes offered as buttons (max ${MAX_OPTIONS})`,
+            description: `post: known outcomes offered as buttons beside the built-in Done and Reply, so leave those two out (max ${MAX_OPTIONS})`,
           },
           id: { type: 'number', description: 'update, remove or complete: task id; list: show that one task in full' },
           all: { type: 'boolean', description: 'list: include every finished task, not just the most recent' },
@@ -732,7 +747,7 @@ export const register: Register = (on) => {
                         resolveTask($, t.id, 'done', '', (r) => `The user ticked off task ${label(r)} as done.`)
                       }
                     />
-                    {t.options.map((opt, j) => (
+                    {distinctOptions(t.options).map((opt, j) => (
                       <Button
                         key={`opt-${j}`}
                         label={opt}
