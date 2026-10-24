@@ -505,3 +505,24 @@ test('update replaces a task\'s steps and keeps the steps already done', async (
   const missing = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'update', id: 9 })).result)
   expect(missing).toContain('No task #9')
 })
+
+test('a reply goes to Claude and leaves the task open', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { drop: 'captured by the test' } as never
+  })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Check', steps: [{ command: 'date' }] })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'reply-1' })
+  await pane.input({ key: 'input-1', text: 'it printed Friday', submit: true } as never)
+  expect(sent.join('\n')).toContain('The user replied on task #1 "Check"; it is still open')
+  expect(sent.join('\n')).toContain('it printed Friday')
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] Check (answer: it printed Friday)')
+  expect(await pane.find({ type: 'Input', key: 'input-1' })).toBeUndefined()
+})
