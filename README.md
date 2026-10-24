@@ -17,7 +17,8 @@ The first time you open the pane (`/human-tasks`) it asks whether Claude should 
 ## Usage
 
 - `/human-tasks` opens the pane, with **Open** and **Completed** tabs. Open tasks arrive folded to their title line; press a title to expand that task and again to fold it. Finished tasks move to Completed, where **Clear completed** lives and each task expands when you press its title. A line separates tasks.
-- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove`, `complete` or `list`. `list` stays short: open tasks plus the five most recent finished ones, with answers cut to a line; `all: true` lists every finished task and `id` shows one task in full. The mod registers it itself; there is no separate MCP server.
+- A task with more than one step is shown one step at a time: a progress row, the current step with its command, what to expect and when to stop, then **Looks right, next** and **Back**. Each task remembers its own step, and its folded title shows it (for example `step 4 of 8, Inputs`), so you can leave a task halfway, work on another and come back. Moving between steps does not message Claude; Done, an outcome or a Reply does, and says which step you were on.
+- Claude uses one tool, `mcp__human-tasks__task`, with `action` of `post` (default), `remove`, `complete` or `list`. `complete` with a `step` checks off one step and leaves the task open. `list` stays short: open tasks plus the five most recent finished ones, with answers cut to a line; `all: true` lists every finished task and `id` shows one task in full. The mod registers it itself; there is no separate MCP server.
 - Tasks are stored per project (keyed by the session's project root) and survive restarts. Removed tasks are dropped and only the 50 most recent finished tasks are kept.
 
 ## Install
