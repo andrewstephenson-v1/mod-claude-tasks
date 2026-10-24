@@ -461,3 +461,47 @@ test('a reply on a multi-step task tells Claude which step it came from', async 
   await pane.press({ key: 'opt-0' })
   expect(sent.join('\n')).toContain('(step 2 of 3, Build) the user chose: "Saw a STOP"')
 })
+
+test('pasting a step\'s output sends it to Claude with the step\'s checks and keeps the task open', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { drop: 'captured by the test' } as never
+  })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'step-next-1' })
+  await pane.press({ key: 'step-paste-1' })
+  const input = await pane.find({ type: 'Input', key: 'paste-1' })
+  expect(input).toBeDefined()
+  await pane.input({ key: 'paste-1', text: 'build ok\nsha256 abc', submit: true } as never)
+  const msg = sent.join('\n')
+  expect(msg).toContain('step 2 (Build) of task #1 "Runbook"')
+  expect(msg).toContain('Stop if: any STOP line')
+  expect(msg).toContain('build ok')
+  expect(msg).toContain('action "complete", id 1, step 2')
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] Runbook (step 2 of 3, Build)')
+})
+
+test('update replaces a task\'s steps and keeps the steps already done', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'complete', id: 1, step: 1 })
+  const res = String((await $.tool.call({
+    tool: 'mcp__human-tasks__task', action: 'update', id: 1,
+    steps: [STEPS[0], { name: 'Fix', command: 'echo fix-marker' }, ...STEPS.slice(1)],
+  })).result)
+  expect(res).toContain('Updated task #1; the user is at step 2 of 4, Fix')
+  const one = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', id: 1 })).result)
+  expect(one).toContain('1. [done] Setup')
+  expect(one).toContain('2. Fix: `echo fix-marker`')
+  const missing = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'update', id: 9 })).result)
+  expect(missing).toContain('No task #9')
+})

@@ -33,6 +33,8 @@ const openExpandedIds = atom({ plugin: 'human-tasks', key: 'openExpandedIds' } a
 /** False until the board is restored from the store; /clear resets it with the rest of the state. */
 const loaded = atom({ plugin: 'human-tasks', key: 'loaded' } as const, false)
 const replyingId = atom({ plugin: 'human-tasks', key: 'replyingId' } as const, null as number | null)
+/** Task whose "Paste output" field is open under its current step. */
+const pastingId = atom({ plugin: 'human-tasks', key: 'pastingId' } as const, null as number | null)
 
 type TaskInput = {
   action?: unknown
@@ -52,7 +54,8 @@ const MODE_KEY = 'mode'
 /** Appended to the system prompt only once the user opts in to automatic use. */
 const AUTO_GUIDANCE = `# human-tasks pane
 When you need the user to do something only they can do (run a command in their own terminal, check a console or dashboard, make a decision, supply a value), post it with the mcp__human-tasks__task tool instead of asking in chat. One task per independent action, in order.
-Check tasks off as you learn they are done. If the user confirms in chat, or pastes output that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.`
+Check tasks off as you learn they are done. If the user confirms in chat, or pastes output that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.
+For a task with several steps, check off one step with action "complete", the id and \`step\`. When the user pastes a step's output from the pane, check it against that step's expect and stop lines: tick the step if it clearly passed; otherwise say what went wrong and, if the remaining steps need to change, rewrite them with action "update".`
 
 const label = (t: Task) => `#${t.id} "${t.title}"${where(t)}`
 
@@ -232,6 +235,56 @@ async function postTask($: Engine, input: TaskInput) {
   return { result: `Posted task #${task.id}. The user will see it in the human-tasks pane (/human-tasks opens it).` }
 }
 
+/** Replace the parts of an open task Claude passes; step progress is kept by position. */
+async function updateTask($: Engine, input: TaskInput) {
+  const id = Number(input.id)
+  const { tasks } = await read($, board)
+  const found = tasks.find((t) => t.id === id)
+  if (!found || found.status === 'removed') return { result: `No task #${id}.` }
+  if (found.status !== 'open') return { result: `Task #${id} is already ${found.status}.` }
+  const title = typeof input.title === 'string' ? input.title.trim() : ''
+  const steps = input.steps === undefined ? undefined : parseSteps(input.steps)
+  let updated: Task | undefined
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) => {
+      if (t.id !== id) return t
+      updated = {
+        ...t,
+        ...(title ? { title } : {}),
+        ...(input.expect !== undefined ? { expect: String(input.expect ?? '') } : {}),
+        ...(input.options !== undefined ? { options: parseOptions(input.options) } : {}),
+        ...(steps ? { steps, stepsDone: doneSteps(t).filter((i) => i < steps.length), current: undefined } : {}),
+      }
+      return updated
+    }),
+  }))
+  if (updated) $.ui.toast(`Task #${id} updated: ${updated.title}`)
+  return { result: `Updated task #${id}${updated && isStepper(updated) ? `; the user is at ${progress(updated)}` : ''}.` }
+}
+
+/** The pasted output of one step goes to Claude to check; the task stays open. */
+async function sendStepOutput($: Engine, id: number, output: string) {
+  const t = (await read($, board)).tasks.find((x) => x.id === id && x.status === 'open')
+  if (!t) return
+  const cur = currentStep(t)
+  const s = t.steps[cur]
+  if (!s) return
+  await update($, pastingId, () => null)
+  const checks = [s.expect && `Expect: ${s.expect}`, s.stop && `Stop if: ${s.stop}`].filter(Boolean)
+  const text = [
+    `The user pasted the output of step ${cur + 1} (${stepName(t, cur)}) of task #${t.id} "${t.title}". Check it against the step:`,
+    ...(checks.length ? checks : [`(No expect line; the step was: ${s.text || s.command})`]),
+    '',
+    'Output:',
+    output,
+    '',
+    `If it clearly passed, call mcp__human-tasks__task with action "complete", id ${t.id}, step ${cur + 1}. If not, say what went wrong; if the remaining steps need to change, call action "update" with id ${t.id} and the corrected steps. Never tick the step on ambiguous output.`,
+  ].join('\n')
+  $.ui.toast(`Sent step ${cur + 1} output to Claude`)
+  void $.prompt.submit({ text })
+}
+
 async function removeTask($: Engine, id: number) {
   const { tasks } = await read($, board)
   const found = tasks.find((t) => t.id === id)
@@ -335,11 +388,11 @@ export const register: Register = (on) => {
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "update" replaces the `title`, `steps`, `expect` or `options` you pass on open task `id` (done steps stay done by position, so keep finished steps first and unchanged); "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
       inputSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['post', 'remove', 'complete', 'list'] },
+          action: { type: 'string', enum: ['post', 'update', 'remove', 'complete', 'list'] },
           title: { type: 'string', description: 'post: short imperative title' },
           steps: {
             type: 'array',
@@ -361,7 +414,7 @@ export const register: Register = (on) => {
             items: { type: 'string' },
             description: `post: known outcomes offered as buttons (max ${MAX_OPTIONS})`,
           },
-          id: { type: 'number', description: 'remove or complete: task id; list: show that one task in full' },
+          id: { type: 'number', description: 'update, remove or complete: task id; list: show that one task in full' },
           all: { type: 'boolean', description: 'list: include every finished task, not just the most recent' },
           note: { type: 'string', description: 'complete: what the user confirmed, in a few words' },
           step: { type: 'number', description: 'complete: check off only this step (1-based) of task `id`, leaving the task open' },
@@ -414,8 +467,10 @@ export const register: Register = (on) => {
         return completeTask($, Number(input.id), input.note, input.step)
       case 'list':
         return listTasks($, input)
+      case 'update':
+        return updateTask($, input)
       default:
-        return { result: 'Unknown action. Use post, remove, complete or list.' }
+        return { result: 'Unknown action. Use post, update, remove, complete or list.' }
     }
   })
 
@@ -447,6 +502,7 @@ export const register: Register = (on) => {
     const Input = 'Input' in ui ? ui.Input : undefined
     const { tasks } = await read($, board)
     const replying = await read($, replyingId)
+    const pasting = await read($, pastingId)
     const currentMode = await read($, mode)
     const currentTab = await read($, tab)
     const expanded = await read($, expandedIds)
@@ -514,8 +570,29 @@ export const register: Register = (on) => {
                 onPress={() => nextStep($, t.id)}
               />
             )}
+            {!allDone && Input && (
+              <Button
+                key={`step-paste-${t.id}`}
+                label={pasting === t.id ? 'Cancel paste' : 'Paste output for Claude to check'}
+                onPress={() => update($, pastingId, (p) => (p === t.id ? null : t.id))}
+              />
+            )}
             {cur > 0 && <Button key={`step-back-${t.id}`} label="‹ Back" onPress={() => backStep($, t.id)} />}
           </Box>
+          {!allDone && Input && pasting === t.id && (
+            <Input
+              key={`paste-${t.id}`}
+              label="Output"
+              placeholder="Paste what the step printed; Claude checks it and ticks the step"
+              value=""
+              submitLabel="send"
+              autoFocus
+              onSubmit={async (value: unknown) => {
+                const text = String(value ?? '').trim()
+                if (text) await sendStepOutput($, t.id, text)
+              }}
+            />
+          )}
         </Box>
       )
     }

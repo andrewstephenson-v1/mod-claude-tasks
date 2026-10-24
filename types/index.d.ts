@@ -39,6 +39,8 @@ declare module 'claude-code' {
       board: Board
       /** Id of the task whose reply field is open, if any. */
       replyingId: number | null
+      /** Id of the task whose step "Paste output" field is open, if any. */
+      pastingId: number | null
       mode: Mode
       /** True once the board has been restored from the store. */
       loaded: boolean
