@@ -207,6 +207,25 @@ async function backStep($: Engine, id: number) {
   }))
 }
 
+/** A reply goes to Claude and the task stays open; Claude or Done closes it. The latest reply is kept as its answer. */
+async function sendReply($: Engine, id: number, text: string) {
+  let replied: Task | undefined
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) => {
+      if (t.id !== id || t.status !== 'open') return t
+      replied = { ...t, answer: text }
+      return replied
+    }),
+  }))
+  if (!replied) return
+  await update($, replyingId, () => null)
+  $.ui.toast(`Reply sent to Claude; task #${id} stays open`)
+  void $.prompt.submit({
+    text: `The user replied on task ${label(replied)}; it is still open in their pane:\n\n${text}\n\nIf this shows the task is finished, call mcp__human-tasks__task with action "complete" and id ${id}; otherwise answer them.`,
+  })
+}
+
 async function clearCompleted($: Engine) {
   await mutate($, (b) => ({ ...b, tasks: b.tasks.filter((t) => !isFinished(t)) }))
 }
@@ -388,7 +407,7 @@ export const register: Register = (on) => {
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done, pick an outcome or reply; you are then messaged with the task id. action "post" (default) adds one task per independent action, in order; "update" replaces the `title`, `steps`, `expect` or `options` you pass on open task `id` (done steps stay done by position, so keep finished steps first and unchanged); "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done or pick an outcome, or you complete it; you are then messaged with the task id. A reply reaches you the same way but leaves the task open, so complete it yourself once the reply shows it is done. action "post" (default) adds one task per independent action, in order; "update" replaces the `title`, `steps`, `expect` or `options` you pass on open task `id` (done steps stay done by position, so keep finished steps first and unchanged); "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -724,6 +743,7 @@ export const register: Register = (on) => {
                     ))}
                     {Input && (
                       <Button
+                        key={`reply-${t.id}`}
                         label={replying === t.id ? 'Cancel reply' : 'Reply'}
                         onPress={() => update($, replyingId, (cur) => (cur === t.id ? null : t.id))}
                       />
@@ -740,13 +760,7 @@ export const register: Register = (on) => {
                       onSubmit={async (value: unknown) => {
                         const text = String(value ?? '').trim()
                         if (!text) return
-                        await resolveTask(
-                          $,
-                          t.id,
-                          'replied',
-                          text,
-                          (r) => `The user replied on task ${label(r)}:\n\n${text}`,
-                        )
+                        await sendReply($, t.id, text)
                       }}
                     />
                   )}

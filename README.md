@@ -6,9 +6,9 @@ Claude posts a task (title, steps or shell commands, what to expect, optional ou
 
 - press **Done**,
 - pick one of its **outcomes**, or
-- **Reply** with free text (for example pasted output).
+- Claude checks it off.
 
-The mod then starts a turn telling Claude what you did.
+The mod then starts a turn telling Claude what you did. **Reply** sends free text (for example pasted output) to Claude the same way but leaves the task open.
 
 ## Automatic use
 
