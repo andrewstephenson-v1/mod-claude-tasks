@@ -54,7 +54,7 @@ const MODE_KEY = 'mode'
 /** Appended to the system prompt only once the user opts in to automatic use. */
 const AUTO_GUIDANCE = `# human-tasks pane
 When you need the user to do something only they can do (run a command in their own terminal, check a console or dashboard, make a decision, supply a value), post it with the mcp__human-tasks__task tool instead of asking in chat. One task per independent action, in order.
-Check tasks off as you learn they are done. If the user confirms in chat, or pastes output that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.
+Check tasks off as you learn they are done. If the user confirms in chat, or pastes output in chat that clearly shows a task's steps succeeded, call the tool with action "complete", the task id and a short note. A Reply sent from the pane never closes its task: answer it and leave the task open. Use "list" if you need the ids. Never complete a task on ambiguous or failing output: ask, or let the user press Done.
 For a task with several steps, check off one step with action "complete", the id and \`step\`. When the user pastes a step's output from the pane, check it against that step's expect and stop lines: tick the step if it clearly passed; otherwise say what went wrong and, if the remaining steps need to change, rewrite them with action "update".`
 
 const label = (t: Task) => `#${t.id} "${t.title}"${where(t)}`
@@ -237,7 +237,7 @@ async function sendReply($: Engine, id: number, text: string) {
   await update($, replyingId, () => null)
   $.ui.toast(`Reply sent to Claude; task #${id} stays open`)
   void $.prompt.submit({
-    text: `The user replied on task ${label(replied)}; it is still open in their pane:\n\n${text}\n\nIf this shows the task is finished, call mcp__human-tasks__task with action "complete" and id ${id}; otherwise answer them.`,
+    text: `The user replied on task ${label(replied)}; it is still open in their pane:\n\n${text}\n\nAnswer them, but leave the task open: do not complete it because of this reply. The user presses Done when it is finished, or tells you so in chat.`,
   })
 }
 
@@ -422,7 +422,7 @@ export const register: Register = (on) => {
     await $.tool.register({
       name: 'task',
       description:
-        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done or pick an outcome, or you complete it; you are then messaged with the task id. A reply reaches you the same way but leaves the task open, so complete it yourself once the reply shows it is done. action "post" (default) adds one task per independent action, in order; "update" replaces the `title`, `steps`, `expect` or `options` you pass on open task `id` (done steps stay done by position, so keep finished steps first and unchanged); "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
+        'Show the user a persistent on-screen task for an action only they can do (e.g. commands to run in their own terminal), instead of burying it in scrolling chat. It stays until they tick it done or pick an outcome, or you complete it; you are then messaged with the task id. A reply reaches you the same way but the task stays open; do not complete a task just because the user replied on it. action "post" (default) adds one task per independent action, in order; "update" replaces the `title`, `steps`, `expect` or `options` you pass on open task `id` (done steps stay done by position, so keep finished steps first and unchanged); "remove" retracts task `id`; "complete" checks off task `id` when the user has confirmed it in chat or pasted output proving it (add a short `note`), or with `step` checks off just that step of a multi-step task; "list" shows open tasks and the few most recent finished ones with short answers (`all` for every finished task, `id` for one task in full).',
       inputSchema: {
         type: 'object',
         properties: {
