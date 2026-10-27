@@ -69,6 +69,11 @@ const doneSteps = (t: Task) => t.stepsDone ?? []
 /** The step on screen: the one the user went Back to, else the first unfinished one; steps.length once all are done. */
 function currentStep(t: Task) {
   if (typeof t.current === 'number' && t.current >= 0 && t.current < t.steps.length) return t.current
+  return activeStep(t)
+}
+
+/** The step the user is working on: the first unfinished one, or steps.length once all are done. */
+function activeStep(t: Task) {
   const done = doneSteps(t)
   const next = t.steps.findIndex((_, i) => !done.includes(i))
   return next === -1 ? t.steps.length : next
@@ -76,7 +81,7 @@ function currentStep(t: Task) {
 
 /** Where the user is in a stepped task, e.g. "step 4 of 8, Inputs". */
 function progress(t: Task) {
-  const cur = currentStep(t)
+  const cur = activeStep(t)
   if (cur >= t.steps.length) return `all ${t.steps.length} steps done`
   const name = t.steps[cur].name
   return `step ${cur + 1} of ${t.steps.length}${name ? `, ${name}` : ''}`
@@ -210,6 +215,18 @@ async function nextStep($: Engine, id: number) {
       const stepsDone = [...new Set([...doneSteps(t), cur])].sort((x, y) => x - y)
       return { ...t, stepsDone, current: undefined }
     }),
+  }))
+}
+
+/** Show step `i` without marking anything, to look back or ahead; like Back, it does not message Claude. */
+async function viewStep($: Engine, id: number, i: number) {
+  await mutate($, (b) => ({
+    ...b,
+    tasks: b.tasks.map((t) =>
+      t.id === id && t.status === 'open' && i >= 0 && i < t.steps.length
+        ? { ...t, current: i === activeStep(t) ? undefined : i }
+        : t,
+    ),
   }))
 }
 
@@ -580,19 +597,38 @@ export const register: Register = (on) => {
     /** One step at a time: a progress row, the step on screen in full, then Next and Back. */
     const stepper = (t: Task) => {
       const cur = currentStep(t)
+      const active = activeStep(t)
       const done = doneSteps(t)
-      const row = t.steps
-        .map((_, i) => `${done.includes(i) ? '✓' : i === cur ? '●' : '○'} ${t.steps[i].name || i + 1}`)
-        .join('  ')
       const allDone = cur >= t.steps.length
+      // ✓ done, ● the step being worked on, ○ still to do; the step on screen is underlined
+      const row = (
+        <Box key={`steps-${t.id}`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {t.steps.map((st, i) => (
+            <Button
+              key={`step-goto-${t.id}-${i}`}
+              plain
+              dimColor={i !== cur}
+              onPress={() => viewStep($, t.id, i)}
+            >
+              {`${done.includes(i) ? '✓' : i === active ? '●' : '○'} `}
+              <Text underline={i === cur}>{st.name || String(i + 1)}</Text>
+            </Button>
+          ))}
+        </Box>
+      )
+      const note = done.includes(cur)
+        ? ' (done)'
+        : cur > active && active < t.steps.length
+          ? ` (looking ahead; you are on step ${active + 1})`
+          : ''
       return (
         <Box key={`stepper-${t.id}`} flexDirection="column">
-          <Text dimColor wrap="wrap">{row}</Text>
+          {row}
           {allDone ? (
             <Text wrap="wrap">{`All ${t.steps.length} steps done. Press Done or pick an outcome below.`}</Text>
           ) : (
             <Box flexDirection="column">
-              <Text dimColor>{`Step ${cur + 1} of ${t.steps.length}${done.includes(cur) ? ' (done)' : ''}`}</Text>
+              <Text dimColor>{`Step ${cur + 1} of ${t.steps.length}${note}`}</Text>
               {stepBody(t, t.steps[cur], cur, '')}
             </Box>
           )}

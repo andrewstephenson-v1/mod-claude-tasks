@@ -550,3 +550,33 @@ test('an outcome named Done or Reply is not drawn twice', async ($, on) => {
   const one = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list', id: 2 })).result)
   expect(one).toContain('Options: Skip | Retry')
 })
+
+test('pressing a step in the progress row shows it without marking it or telling Claude', async ($, on) => {
+  const store = memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { drop: 'captured by the test' } as never
+  })
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'step-goto-1-2' })
+  expect(await pane.find({ type: 'Code', text: 'echo run-marker' })).toBeDefined()
+  expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Step 3 of 3 (looking ahead; you are on step 1)' })).toBeDefined()
+  const underlined = async (text: string) =>
+    JSON.stringify(await pane.find({ type: 'Text', text })).includes('"underline":true')
+  expect(await underlined('Run')).toBe(true)
+  expect(await underlined('Setup')).toBe(false)
+  // The title still names the step being worked on
+  const title = await pane.find({ type: 'Button', key: 'open-toggle-1' })
+  expect(JSON.stringify(title)).toContain('step 1 of 3, Setup')
+  const saved = store.get('tasks:/test/project') as { tasks: { stepsDone?: number[] }[] }
+  expect(JSON.stringify(saved.tasks[0].stepsDone ?? [])).toBe('[]')
+  await pane.press({ key: 'step-goto-1-0' })
+  expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeDefined()
+  expect(sent.length).toBe(0)
+})
