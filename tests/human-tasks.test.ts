@@ -522,6 +522,7 @@ test('a reply goes to Claude and leaves the task open', async ($, on) => {
   await pane.input({ key: 'input-1', text: 'it printed Friday', submit: true } as never)
   expect(sent.join('\n')).toContain('The user replied on task #1 "Check"; it is still open')
   expect(sent.join('\n')).toContain('it printed Friday')
+  expect(sent.join('\n')).toContain('leave the task open: do not complete it')
   const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
   expect(listed).toContain('#1 [open] Check (answer: it printed Friday)')
   expect(await pane.find({ type: 'Input', key: 'input-1' })).toBeUndefined()
