@@ -8,7 +8,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import type { Board, Mode, Tab, Task, TaskStatus } from '../types'
+import type { Board, Mode, StepLayout, Tab, Task, TaskStatus } from '../types'
 
 const PANE = 'human-tasks'
 // Not 'tasks': that is a built-in command and the engine refuses it
@@ -26,6 +26,8 @@ const LIST_ANSWER_CHARS = 120
 
 const board = atom({ plugin: 'human-tasks', key: 'board' } as const, { tasks: [], nextId: 1 } as Board)
 const mode = atom({ plugin: 'human-tasks', key: 'mode' } as const, 'unset' as Mode)
+/** How a stepped task lists its steps: one per line (the default) or across one row. */
+const stepLayout = atom({ plugin: 'human-tasks', key: 'stepLayout' } as const, 'vertical' as StepLayout)
 const tab = atom({ plugin: 'human-tasks', key: 'tab' } as const, 'open' as Tab)
 const expandedIds = atom({ plugin: 'human-tasks', key: 'expandedIds' } as const, [] as number[])
 /** Open tasks start folded to their title; these are the ones the user has unfolded. */
@@ -50,6 +52,8 @@ type TaskInput = {
 
 /** Not per project: the choice follows the user. */
 const MODE_KEY = 'mode'
+/** Also the user's, not per project. */
+const STEP_LAYOUT_KEY = 'stepLayout'
 
 /** Appended to the system prompt only once the user opts in to automatic use. */
 const AUTO_GUIDANCE = `# human-tasks pane
@@ -65,6 +69,13 @@ const isStepper = (t: Task) => t.steps.length > 1
 const stepName = (t: Task, i: number) => t.steps[i]?.name || `Step ${i + 1}`
 
 const doneSteps = (t: Task) => t.stepsDone ?? []
+
+/** A step's line in the vertical list: its name, else the start of its text or command. */
+function stepTitle(s: Task['steps'][number]) {
+  const raw = s.name || s.text || s.command
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat
+}
 
 /** The step on screen: the one the user went Back to, else the first unfinished one; steps.length once all are done. */
 function currentStep(t: Task) {
@@ -136,6 +147,11 @@ function prune(b: Board): Board {
   return { ...b, tasks: kept.filter((t) => !drop.has(t.id)) }
 }
 
+async function setStepLayout($: Engine, next: StepLayout) {
+  await update($, stepLayout, () => next)
+  await $.store.set(STEP_LAYOUT_KEY, next)
+}
+
 async function setMode($: Engine, next: Mode) {
   await update($, mode, () => next)
   await $.store.set(MODE_KEY, next)
@@ -164,6 +180,8 @@ async function restoreState($: Engine) {
   }
   const savedMode = await $.store.get(MODE_KEY)
   if (savedMode === 'auto' || savedMode === 'manual') await update($, mode, () => savedMode)
+  const savedLayout = await $.store.get(STEP_LAYOUT_KEY)
+  if (savedLayout === 'vertical' || savedLayout === 'row') await update($, stepLayout, () => savedLayout)
   await update($, loaded, () => true)
 }
 
@@ -554,6 +572,7 @@ export const register: Register = (on) => {
     const { tasks } = await read($, board)
     const replying = await read($, replyingId)
     const pasting = await read($, pastingId)
+    const layout = await read($, stepLayout)
     const currentMode = await read($, mode)
     const currentTab = await read($, tab)
     const expanded = await read($, expandedIds)
@@ -601,8 +620,13 @@ export const register: Register = (on) => {
       const done = doneSteps(t)
       const allDone = cur >= t.steps.length
       // ✓ done, ● the step being worked on, ○ still to do; the step on screen is underlined
+      const vertical = layout === 'vertical'
       const row = (
-        <Box key={`steps-${t.id}`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+        <Box
+          key={`steps-${t.id}`}
+          flexDirection={vertical ? 'column' : 'row'}
+          {...(vertical ? {} : { flexWrap: 'wrap' as const, columnGap: 2 })}
+        >
           {t.steps.map((st, i) => (
             <Button
               key={`step-goto-${t.id}-${i}`}
@@ -611,7 +635,9 @@ export const register: Register = (on) => {
               onPress={() => viewStep($, t.id, i)}
             >
               {`${done.includes(i) ? '✓' : i === active ? '●' : '○'} `}
-              <Text underline={i === cur}>{st.name || String(i + 1)}</Text>
+              <Text underline={i === cur}>
+                {vertical ? `${i + 1}. ${stepTitle(st)}` : st.name || String(i + 1)}
+              </Text>
             </Button>
           ))}
         </Box>
@@ -691,7 +717,14 @@ export const register: Register = (on) => {
             {tabButton('open', 'Open', open.length)}
             {tabButton('completed', 'Completed', finished.length)}
           </Box>
-          {modeButton}
+          <Box flexDirection="row" columnGap={1}>
+            <Button
+              key="layout-toggle"
+              label={layout === 'vertical' ? 'Steps: list' : 'Steps: row'}
+              onPress={() => setStepLayout($, layout === 'vertical' ? 'row' : 'vertical')}
+            />
+            {modeButton}
+          </Box>
         </Box>
         {rule('tabs-rule')}
       </Box>
