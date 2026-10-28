@@ -569,8 +569,8 @@ test('pressing a step in the progress row shows it without marking it or telling
   expect(await pane.find({ type: 'Text', text: 'Step 3 of 3 (looking ahead; you are on step 1)' })).toBeDefined()
   const underlined = async (text: string) =>
     JSON.stringify(await pane.find({ type: 'Text', text })).includes('"underline":true')
-  expect(await underlined('Run')).toBe(true)
-  expect(await underlined('Setup')).toBe(false)
+  expect(await underlined('3. Run')).toBe(true)
+  expect(await underlined('1. Setup')).toBe(false)
   // The title still names the step being worked on
   const title = await pane.find({ type: 'Button', key: 'open-toggle-1' })
   expect(JSON.stringify(title)).toContain('step 1 of 3, Setup')
@@ -579,4 +579,22 @@ test('pressing a step in the progress row shows it without marking it or telling
   await pane.press({ key: 'step-goto-1-0' })
   expect(await pane.find({ type: 'Code', text: 'echo setup-marker' })).toBeDefined()
   expect(sent.length).toBe(0)
+})
+
+test('steps are listed one per line by default and the layout toggle puts them in a row and is kept', async ($, on) => {
+  const store = memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  expect(await pane.find({ type: 'Text', text: '2. Build' })).toBeDefined()
+  expect(JSON.stringify(await pane.find({ type: 'Button', key: 'layout-toggle' }))).toContain('Steps: list')
+  await pane.press({ key: 'layout-toggle' })
+  expect(await pane.find({ type: 'Text', text: '2. Build' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Build' })).toBeDefined()
+  expect(store.get('stepLayout')).toBe('row')
+  // The row layout still jumps to a step
+  await pane.press({ key: 'step-goto-1-1' })
+  expect(await pane.find({ type: 'Code', text: 'echo build-marker' })).toBeDefined()
 })

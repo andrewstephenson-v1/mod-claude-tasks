@@ -28,6 +28,9 @@ export type Task = {
 /** Whether Claude uses the pane on its own: `unset` until the user answers the onboarding card. */
 export type Mode = 'unset' | 'auto' | 'manual'
 
+/** How a stepped task lists its steps: one per line, or across one row. */
+export type StepLayout = 'vertical' | 'row'
+
 /** The pane's two views. */
 export type Tab = 'open' | 'completed'
 
@@ -42,6 +45,8 @@ declare module 'claude-code' {
       /** Id of the task whose step "Paste output" field is open, if any. */
       pastingId: number | null
       mode: Mode
+      /** How stepped tasks list their steps; kept across sessions. */
+      stepLayout: StepLayout
       /** True once the board has been restored from the store. */
       loaded: boolean
       tab: Tab
