@@ -603,7 +603,8 @@ export const register: Register = (on) => {
             onPress={async (press) => {
               // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
               const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
-              $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
+              const which = `step ${i + 1}${s.name ? ` (${s.name})` : ''} of task #${t.id}`
+              $.ui.toast(isCopied ? `Copied ${which}` : `Could not copy ${which}`)
             }}
           />
         )}

@@ -598,3 +598,22 @@ test('steps are listed one per line by default and the layout toggle puts them i
   await pane.press({ key: 'step-goto-1-1' })
   expect(await pane.find({ type: 'Code', text: 'echo build-marker' })).toBeDefined()
 })
+
+test('the Copy toast names the step and the task', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  const toasts: string[] = []
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.invalidate', async () => ({ value: undefined }))
+  on('ui.toast', async (_$, e) => {
+    toasts.push(String((e as { text?: unknown }).text ?? JSON.stringify(e)))
+    return { value: undefined }
+  })
+  on('ui.copy', async () => ({ value: { isCopied: true } }) as never)
+  await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'post', title: 'Runbook', steps: STEPS })
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'step-goto-1-1' })
+  await pane.press({ key: 'copy-1-1' })
+  expect(toasts.join('\n')).toContain('Copied step 2 (Build) of task #1')
+})
