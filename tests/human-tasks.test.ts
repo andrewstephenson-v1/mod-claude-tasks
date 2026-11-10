@@ -617,3 +617,26 @@ test('the Copy toast names the step and the task', async ($, on) => {
   await pane.press({ key: 'copy-1-1' })
   expect(toasts.join('\n')).toContain('Copied step 2 (Build) of task #1')
 })
+
+test('/human-tasks add posts a note for the user that does not message Claude when done', async ($, on) => {
+  memoryStore(on)
+  stubProject(on)
+  stubUi(on)
+  const sent: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { drop: 'captured by the test' } as never
+  })
+  const added = await $.command.run({ command: 'human-tasks', args: 'add  this is a note to myself ' } as never)
+  expect(String((added as { text?: unknown }).text)).toContain('Added task #1: this is a note to myself')
+  const listed = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(listed).toContain('#1 [open] (note the user added for themselves) this is a note to myself')
+  const empty = await $.command.run({ command: 'human-tasks', args: 'add' } as never)
+  expect(String((empty as { text?: unknown }).text)).toContain('Usage: /human-tasks add')
+  const pane = await mountPane($)
+  await pane.press({ key: 'open-toggle-1' })
+  await pane.press({ key: 'done-1' })
+  const after = String((await $.tool.call({ tool: 'mcp__human-tasks__task', action: 'list' })).result)
+  expect(after).toContain('#1 [done]')
+  expect(sent.length).toBe(0)
+})
