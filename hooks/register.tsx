@@ -218,6 +218,11 @@ async function resolveTask(
   // Already resolved or removed (a double press): nothing to tell Claude
   if (!resolved) return
   await update($, replyingId, () => null)
+  // A note the user added for themselves is theirs alone: ticking it off is not news for Claude
+  if (resolved.byUser) {
+    $.ui.toast(`Task #${resolved.id} ${resolved.status}`)
+    return
+  }
   // Waits for the session to be idle, so do not await it
   void $.prompt.submit({ text: message(resolved) })
 }
@@ -354,6 +359,28 @@ async function sendStepOutput($: Engine, id: number, output: string) {
   void $.prompt.submit({ text })
 }
 
+/** `/human-tasks add <text>`: a note the user posts for themselves, with no steps. */
+async function addNote($: Engine, text: string) {
+  let task: Task | undefined
+  await mutate($, (b) => {
+    task = {
+      id: b.nextId,
+      title: text,
+      steps: [],
+      expect: '',
+      options: [],
+      status: 'open',
+      answer: '',
+      byUser: true,
+    }
+    return prune({ tasks: [...b.tasks, task], nextId: b.nextId + 1 })
+  })
+  if (!task) return { text: 'Could not add the task.' }
+  await update($, tab, () => 'open' as Tab)
+  await openPane($, false)
+  return { text: `Added task #${task.id}: ${task.title}` }
+}
+
 async function removeTask($: Engine, id: number) {
   const { tasks } = await read($, board)
   const found = tasks.find((t) => t.id === id)
@@ -401,7 +428,7 @@ function brief(text: string, max = LIST_ANSWER_CHARS) {
 }
 
 const listLine = (t: Task) =>
-  `#${t.id} [${t.status}] ${t.title}${t.status === 'open' ? where(t) : ''}${t.answer ? ` (answer: ${brief(t.answer)})` : ''}`
+  `#${t.id} [${t.status}]${t.byUser ? ' (note the user added for themselves)' : ''} ${t.title}${t.status === 'open' ? where(t) : ''}${t.answer ? ` (answer: ${brief(t.answer)})` : ''}`
 
 /** One task in full: its steps, what to expect, its outcomes and the whole answer. */
 function describeTask(t: Task) {
@@ -491,7 +518,12 @@ export const register: Register = (on) => {
       },
     })
     try {
-      await $.command.register({ name: COMMAND, description: 'Show the human-tasks pane', immediate: true })
+      await $.command.register({
+        name: COMMAND,
+        description: 'Show the human-tasks pane, or add a note for yourself with "add <text>"',
+        argumentHint: '[add <note>]',
+        immediate: true,
+      })
     } catch (err) {
       $.ui.log(`could not register /${COMMAND}: ${String(err)}`)
     }
@@ -558,8 +590,14 @@ export const register: Register = (on) => {
     }
   })
 
-  on('command.run', { command: COMMAND }, async ($) => {
+  on('command.run', { command: COMMAND }, async ($, e) => {
     await ensureLoaded($)
+    const [verb, ...rest] = e.args.trim().split(/\s+/)
+    if (verb?.toLowerCase() === 'add') {
+      const text = rest.join(' ').trim()
+      if (!text) return { text: `Usage: /${COMMAND} add <what you need to do>` }
+      return addNote($, text)
+    }
     await openPane($, true)
     return {}
   })
@@ -603,7 +641,8 @@ export const register: Register = (on) => {
             onPress={async (press) => {
               // Selecting wrapped text copies the soft wraps as newlines; this copies the raw command
               const { isCopied } = await $.ui.copy({ text: s.command, surface: press.surface })
-              $.ui.toast(isCopied ? 'Command copied' : 'Could not copy the command')
+              const which = `step ${i + 1}${s.name ? ` (${s.name})` : ''} of task #${t.id}`
+              $.ui.toast(isCopied ? `Copied ${which}` : `Could not copy ${which}`)
             }}
           />
         )}
@@ -811,6 +850,7 @@ export const register: Register = (on) => {
                   )}
                   <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
                     <Button
+                      key={`done-${t.id}`}
                       label="Done"
                       onPress={() =>
                         resolveTask($, t.id, 'done', '', (r) => `The user ticked off task ${label(r)} as done.`)

@@ -21,6 +21,8 @@ export type Task = {
   answer: string
   /** Indexes of the steps the user has marked done; missing on tasks saved before step progress. */
   stepsDone?: number[]
+  /** Added by the user with `/human-tasks add`, not posted by Claude; ticking it off does not message Claude. */
+  byUser?: boolean
   /** Step the user is looking at, when they moved off the first unfinished one with Back. */
   current?: number
 }
